@@ -64,6 +64,7 @@ export class MemoryDatabase {
    * Initialize database schema
    */
   private initializeSchema(): void {
+    // First, create base tables (without project_scope index)
     this.db.exec(`
       -- Sessions table
       CREATE TABLE IF NOT EXISTS sessions (
@@ -162,7 +163,7 @@ export class MemoryDatabase {
         FOREIGN KEY (memory_id) REFERENCES memory_units(id)
       );
 
-      -- Indexes for performance
+      -- Indexes for performance (excluding project_scope - added after migration)
       CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
       CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
       CREATE INDEX IF NOT EXISTS idx_memory_store ON memory_units(store);
@@ -170,12 +171,17 @@ export class MemoryDatabase {
       CREATE INDEX IF NOT EXISTS idx_memory_strength ON memory_units(strength);
       CREATE INDEX IF NOT EXISTS idx_memory_classification ON memory_units(classification);
       CREATE INDEX IF NOT EXISTS idx_memory_session ON memory_units(session_id);
-      CREATE INDEX IF NOT EXISTS idx_memory_project_scope ON memory_units(project_scope);
       CREATE INDEX IF NOT EXISTS idx_retrieval_session ON retrieval_logs(session_id);
     `);
 
-    // Migration: Add project_scope column if it doesn't exist (for existing DBs)
+    // Migration: Add project_scope column if it doesn't exist (for existing DBs pre-v1.6)
+    // MUST run before creating index on project_scope
     this.migrateProjectScope();
+    
+    // Now safe to create index on project_scope (column guaranteed to exist)
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_memory_project_scope ON memory_units(project_scope);
+    `);
 
     // Create vector table only if vec extension is loaded
     if (this.vecEnabled) {
