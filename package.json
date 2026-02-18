@@ -56,13 +56,15 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "sqlite-vec": "^0.1.7-alpha.2",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.2.3",
-    "better-sqlite3": "^12.6.2",
     "esbuild": "^0.27.3",
-    "sqlite-vec": "^0.1.7-alpha.2",
-    "typescript": "^5.9.3",
-    "uuid": "^13.0.0"
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=0.1.0"

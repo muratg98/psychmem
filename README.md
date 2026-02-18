@@ -381,8 +381,17 @@ export async function createDatabase(dbPath: string): Promise<SqliteDatabase> {
 
 ## Installation
 
+### Prerequisites
+
+PsychMem uses `better-sqlite3` which requires native compilation. Ensure you have:
+
+- **Windows**: [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with "Desktop development with C++" workload, and Python 3.x
+- **macOS**: Xcode Command Line Tools (`xcode-select --install`)
+- **Linux**: `build-essential` package (`sudo apt install build-essential`)
+
 ### OpenCode Plugin
 
+**Linux/macOS:**
 ```bash
 # Clone to plugins directory
 git clone https://github.com/muratg98/psychmem.git ~/.config/opencode/plugins/psychmem
@@ -393,10 +402,29 @@ npm install
 npm run build
 ```
 
+**Windows (PowerShell):**
+```powershell
+# Clone to plugins directory
+git clone https://github.com/muratg98/psychmem.git "$env:USERPROFILE\.opencode\plugins\psychmem"
+
+# Install and build
+cd "$env:USERPROFILE\.opencode\plugins\psychmem"
+npm install
+npm run build
+```
+
+**Alternative: Project-local plugin**
+```bash
+# Clone inside your project
+git clone https://github.com/muratg98/psychmem.git .opencode/plugins/psychmem
+cd .opencode/plugins/psychmem
+npm install && npm run build
+```
+
 Add to `opencode.json`:
 ```json
 {
-  "plugin": ["psychmem"]
+  "plugins": ["psychmem"]
 }
 ```
 
