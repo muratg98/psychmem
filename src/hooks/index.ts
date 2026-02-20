@@ -250,7 +250,19 @@ export class PsychMemHooks {
    * PostToolUse: Capture tool execution for memory extraction
    */
   private handlePostToolUse(input: HookInput): HookOutput {
-    const sessionId = this.resolveSessionId(input);
+    let sessionId = this.resolveSessionId(input);
+    
+    // Auto-create session if SessionStart was missed
+    if (!sessionId && input.sessionId) {
+      const session = this.db.createSession('', {
+        externalSessionId: input.sessionId,
+        metadata: { autoCreated: true, reason: 'post-tool-use-without-session-start' },
+      });
+      this.currentSessionId = session.id;
+      this.sessionMap.set(input.sessionId, session.id);
+      sessionId = session.id;
+    }
+    
     if (!sessionId) {
       return { success: false, error: 'No active session' };
     }
@@ -267,7 +279,21 @@ export class PsychMemHooks {
    * Stop: Process session events and extract memories
    */
   private async handleStop(input: HookInput): Promise<HookOutput> {
-    const sessionId = this.resolveSessionId(input);
+    let sessionId = this.resolveSessionId(input);
+    
+    // Auto-create session if SessionStart was missed (e.g. plugin restarted mid-session)
+    if (!sessionId && input.sessionId) {
+      const data = input.data as StopData;
+      const project = (data.metadata as Record<string, unknown> | undefined)?.project as string | undefined ?? '';
+      const session = this.db.createSession(project, {
+        externalSessionId: input.sessionId,
+        metadata: { autoCreated: true, reason: 'stop-without-session-start' },
+      });
+      this.currentSessionId = session.id;
+      this.sessionMap.set(input.sessionId, session.id);
+      sessionId = session.id;
+    }
+    
     if (!sessionId) {
       return { success: false, error: 'No active session' };
     }

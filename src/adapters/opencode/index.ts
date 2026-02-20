@@ -391,20 +391,27 @@ async function handleSessionIdle(
       metadata: {
         messageRange: { from: watermark, to: messages.length },
         agentType: 'opencode',
+        project: state.worktree, // passed so auto-create session gets the right project
       },
     } as StopData,
   };
   
   const result = await state.psychmem.handleHook(hookInput);
   
-  // Update watermark
+  // Update watermark only after successful (or at least attempted) processing
   state.db.updateMessageWatermark(effectiveSessionId, messages.length);
   
   if (result.success) {
-    debugLog(`Stop hook succeeded — processed ${newMessages.length} messages, watermark now: ${messages.length}`);
-    log(ctx, 'debug', `Processed ${newMessages.length} messages, watermark: ${messages.length}`);
+    const memoriesCreated = result.memoriesCreated ?? 0;
+    debugLog(`Stop hook succeeded — processed ${newMessages.length} messages, watermark now: ${messages.length}, memories created: ${memoriesCreated}`);
+    if (memoriesCreated > 0) {
+      log(ctx, 'info', `Extracted ${memoriesCreated} memories (watermark: ${messages.length})`);
+    } else {
+      log(ctx, 'debug', `Processed ${newMessages.length} messages, watermark: ${messages.length}, no new memories`);
+    }
   } else {
-    debugLog(`Stop hook returned success=false`);
+    debugLog(`Stop hook returned success=false — error: ${result.error ?? 'unknown'}`);
+    log(ctx, 'warn', `Stop hook failed: ${result.error ?? 'unknown'}`);
   }
 }
 
