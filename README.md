@@ -391,52 +391,48 @@ PsychMem uses `better-sqlite3` which requires native compilation. Ensure you hav
 
 ### OpenCode Plugin
 
-**Linux/macOS:**
+OpenCode auto-loads any `.ts` or `.js` files placed in its plugin directories — **no `opencode.json` changes needed**. The `plugin` key in `opencode.json` is only for published npm packages.
+
+**Option 1: Global (works in every project) — Linux/macOS:**
 ```bash
-# Clone and build
+# Clone the repo into the global plugin directory
 git clone https://github.com/muratg98/psychmem.git ~/.config/opencode/plugins/psychmem
 cd ~/.config/opencode/plugins/psychmem
 npm install && npm run build
+
+# Symlink the plugin entry point into the auto-load directory
+ln -s ~/.config/opencode/plugins/psychmem/.opencode/plugins/psychmem.ts \
+      ~/.config/opencode/plugins/psychmem.ts
 ```
 
-Add to `opencode.json` using the **absolute path** to the plugin entry point:
-```json
-{
-  "plugins": ["~/.config/opencode/plugins/psychmem/.opencode/plugins/psychmem.ts"]
-}
-```
-
-**Windows (PowerShell):**
+**Option 1: Global — Windows (PowerShell):**
 ```powershell
-# Clone and build
+# Clone the repo
 git clone https://github.com/muratg98/psychmem.git "$env:USERPROFILE\.config\opencode\plugins\psychmem"
 cd "$env:USERPROFILE\.config\opencode\plugins\psychmem"
 npm install && npm run build
+
+# Copy the plugin entry point into the auto-load directory
+Copy-Item ".opencode\plugins\psychmem.ts" "$env:USERPROFILE\.config\opencode\plugins\psychmem.ts"
 ```
 
-Add to `opencode.json`:
-```json
-{
-  "plugins": ["C:/Users/<YourUsername>/.config/opencode/plugins/psychmem/.opencode/plugins/psychmem.ts"]
-}
-```
+> **Note (Windows):** The plugin imports from a relative `../../dist/` path. After copying, edit the copied `psychmem.ts` and replace the `../../dist/` imports with the absolute path to the `dist/` folder, e.g. `C:/Users/<YourUsername>/.config/opencode/plugins/psychmem/dist/`.
 
-**Alternative: Project-local plugin**
+**Option 2: Project-local (only active in one project):**
 ```bash
-# Clone inside your project
+# Clone directly into your project's plugin auto-load directory
 git clone https://github.com/muratg98/psychmem.git .opencode/plugins/psychmem
 cd .opencode/plugins/psychmem
 npm install && npm run build
+
+# Symlink (or copy) the entry point up one level so OpenCode picks it up
+ln -s .opencode/plugins/psychmem/.opencode/plugins/psychmem.ts \
+      .opencode/plugins/psychmem.ts
 ```
 
-Add to your project's `opencode.json`:
-```json
-{
-  "plugins": [".opencode/plugins/psychmem/.opencode/plugins/psychmem.ts"]
-}
-```
+OpenCode will automatically load any `.ts` file in `.opencode/plugins/` at startup — no config entry required.
 
-> **Note:** OpenCode loads local plugins by file path, not by package name. Always point `plugins` to the `.opencode/plugins/psychmem.ts` entry point inside the cloned repo.
+> **Do not add `"plugin": ["psychmem"]` to `opencode.json`** — that tells OpenCode to fetch `psychmem` from npm, which will fail with a `BunInstallFailedError` until the package is published.
 
 ### Claude Code Integration
 
