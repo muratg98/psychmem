@@ -393,24 +393,32 @@ PsychMem uses `better-sqlite3` which requires native compilation. Ensure you hav
 
 **Linux/macOS:**
 ```bash
-# Clone to plugins directory
+# Clone and build
 git clone https://github.com/muratg98/psychmem.git ~/.config/opencode/plugins/psychmem
-
-# Install and build
 cd ~/.config/opencode/plugins/psychmem
-npm install
-npm run build
+npm install && npm run build
+```
+
+Add to `opencode.json` using the **absolute path** to the plugin entry point:
+```json
+{
+  "plugins": ["~/.config/opencode/plugins/psychmem/.opencode/plugins/psychmem.ts"]
+}
 ```
 
 **Windows (PowerShell):**
 ```powershell
-# Clone to plugins directory
-git clone https://github.com/muratg98/psychmem.git "$env:USERPROFILE\.opencode\plugins\psychmem"
+# Clone and build
+git clone https://github.com/muratg98/psychmem.git "$env:USERPROFILE\.config\opencode\plugins\psychmem"
+cd "$env:USERPROFILE\.config\opencode\plugins\psychmem"
+npm install && npm run build
+```
 
-# Install and build
-cd "$env:USERPROFILE\.opencode\plugins\psychmem"
-npm install
-npm run build
+Add to `opencode.json`:
+```json
+{
+  "plugins": ["C:/Users/<YourUsername>/.config/opencode/plugins/psychmem/.opencode/plugins/psychmem.ts"]
+}
 ```
 
 **Alternative: Project-local plugin**
@@ -421,12 +429,14 @@ cd .opencode/plugins/psychmem
 npm install && npm run build
 ```
 
-Add to `opencode.json`:
+Add to your project's `opencode.json`:
 ```json
 {
-  "plugins": ["psychmem"]
+  "plugins": [".opencode/plugins/psychmem/.opencode/plugins/psychmem.ts"]
 }
 ```
+
+> **Note:** OpenCode loads local plugins by file path, not by package name. Always point `plugins` to the `.opencode/plugins/psychmem.ts` entry point inside the cloned repo.
 
 ### Claude Code Integration
 
