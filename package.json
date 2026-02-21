@@ -1,6 +1,6 @@
 {
   "name": "psychmem",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Psych-grounded selective memory system for AI agents with STM/LTM consolidation, decay curves, and learned importance weights",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
