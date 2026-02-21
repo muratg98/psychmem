@@ -5,18 +5,26 @@
  * Command-line interface for the selective memory system
  * 
  * Usage:
- *   psychmem hook <json>          Process a hook event (stdin or arg)
- *   psychmem search <query>       Search memories
- *   psychmem get <id>             Get memory details
- *   psychmem stats                Show memory statistics
- *   psychmem decay                Apply decay to all memories
- *   psychmem consolidate          Run STM→LTM consolidation
- *   psychmem pin <id>             Pin a memory (prevent decay)
- *   psychmem forget <id>          Forget a memory
- *   psychmem remember <id>        Boost memory to LTM
+ *   psychmem install               Install PsychMem (interactive)
+ *   psychmem install --opencode    Install for OpenCode only
+ *   psychmem install --claude      Install for Claude Code only
+ *   psychmem install --both        Install for both agents
+ *   psychmem hook <json>           Process a hook event (stdin or arg)
+ *   psychmem search <query>        Search memories
+ *   psychmem get <id>              Get memory details
+ *   psychmem stats                 Show memory statistics
+ *   psychmem decay                 Apply decay to all memories
+ *   psychmem consolidate           Run STM→LTM consolidation
+ *   psychmem pin <id>              Pin a memory (prevent decay)
+ *   psychmem forget <id>           Forget a memory
+ *   psychmem remember <id>         Boost memory to LTM
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import { PsychMem, createPsychMem } from './index.js';
 import type { HookInput } from './types/index.js';
 import { TranscriptParser } from './transcript/parser.js';
@@ -44,6 +52,12 @@ const args = filteredArgs;
 const command = args[0];
 
 async function main() {
+  // Install command doesn't need a PsychMem instance
+  if (command === 'install') {
+    await handleInstall(args.slice(1));
+    return;
+  }
+
   const psychmem = await createPsychMem({ agentType });
   
   try {
@@ -129,6 +143,173 @@ async function main() {
   } finally {
     psychmem.close();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Install command
+// ---------------------------------------------------------------------------
+
+async function handleInstall(installArgs: string[]) {
+  const forOpenCode = installArgs.includes('--opencode') || installArgs.includes('--both');
+  const forClaude = installArgs.includes('--claude') || installArgs.includes('--both');
+  const hasFlag = forOpenCode || forClaude;
+
+  let installOpenCode = forOpenCode;
+  let installClaude = forClaude;
+
+  if (!hasFlag) {
+    // Interactive prompt
+    const answer = await prompt(
+      'Which agent would you like to install PsychMem for?\n' +
+      '  1) OpenCode\n' +
+      '  2) Claude Code\n' +
+      '  3) Both\n' +
+      'Enter 1, 2, or 3: '
+    );
+    const trimmed = answer.trim();
+    if (trimmed === '1') {
+      installOpenCode = true;
+    } else if (trimmed === '2') {
+      installClaude = true;
+    } else if (trimmed === '3') {
+      installOpenCode = true;
+      installClaude = true;
+    } else {
+      console.error('Invalid choice. Run `psychmem install --opencode`, `--claude`, or `--both`.');
+      process.exit(1);
+    }
+  }
+
+  if (installOpenCode) await installForOpenCode();
+  if (installClaude) await installForClaude();
+}
+
+function prompt(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    process.stdout.write(question);
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.resume();
+    process.stdin.once('data', (chunk) => {
+      data += chunk;
+      process.stdin.pause();
+      resolve(data.split('\n')[0] ?? '');
+    });
+  });
+}
+
+async function installForOpenCode() {
+  console.log('\nInstalling PsychMem for OpenCode...');
+
+  const configDir = path.join(os.homedir(), '.config', 'opencode');
+  const pluginsDir = path.join(configDir, 'plugins');
+  const pkgPath = path.join(configDir, 'package.json');
+
+  // 1. Ensure plugins dir exists
+  fs.mkdirSync(pluginsDir, { recursive: true });
+
+  // 2. Write plugin file
+  const pluginFile = path.join(pluginsDir, 'psychmem.js');
+  const pluginContent = `import { createOpenCodePlugin } from "psychmem/adapters/opencode";
+
+export const PsychMem = async (ctx) => {
+  return await createOpenCodePlugin(ctx);
+};
+`;
+  fs.writeFileSync(pluginFile, pluginContent, 'utf8');
+  console.log(`  ✓ Plugin file written: ${pluginFile}`);
+
+  // 3. Update package.json
+  let pkg: Record<string, any> = {};
+  if (fs.existsSync(pkgPath)) {
+    try { pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')); } catch {}
+  }
+  if (!pkg.dependencies) pkg.dependencies = {};
+  pkg.dependencies['psychmem'] = 'latest';
+  if (!pkg.dependencies['@opencode-ai/plugin']) {
+    pkg.dependencies['@opencode-ai/plugin'] = 'latest';
+  }
+  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+  console.log(`  ✓ package.json updated: ${pkgPath}`);
+
+  // 4. Run bun install
+  console.log('  Running bun install...');
+  try {
+    execSync('bun install', { cwd: configDir, stdio: 'inherit' });
+    console.log('  ✓ Dependencies installed');
+  } catch {
+    console.warn('  ! bun install failed. Run it manually in: ' + configDir);
+  }
+
+  console.log('\nOpenCode installation complete.');
+  console.log('Restart OpenCode to activate PsychMem.\n');
+}
+
+async function installForClaude() {
+  console.log('\nInstalling PsychMem for Claude Code...');
+
+  const claudeDir = path.join(os.homedir(), '.claude');
+  const settingsPath = path.join(claudeDir, 'settings.json');
+
+  // Resolve the psychmem package root (where this CLI binary lives)
+  // When installed via npm, import.meta.url points to dist/cli.js inside the package
+  const packageRoot = path.resolve(fileURLToPath(import.meta.url), '..', '..');
+
+  // 1. Load existing settings
+  let settings: Record<string, any> = {};
+  if (fs.existsSync(settingsPath)) {
+    try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
+  } else {
+    fs.mkdirSync(claudeDir, { recursive: true });
+  }
+
+  // 2. Load our hooks.json
+  const hooksJsonPath = path.join(packageRoot, 'hooks', 'hooks.json');
+  if (!fs.existsSync(hooksJsonPath)) {
+    console.error(`  ! hooks/hooks.json not found at ${hooksJsonPath}`);
+    process.exit(1);
+  }
+  const psychmemHooks = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8')) as {
+    hooks: Record<string, Array<{ matcher?: string; hooks: Array<Record<string, unknown>> }>>;
+  };
+
+  // 3. Resolve the CLI path and replace placeholder
+  const cliPath = path.join(packageRoot, 'dist', 'cli.js');
+  const hookCommand = `node "${cliPath}" hook --agent claude-code`;
+
+  // 4. Merge hooks into settings
+  if (!settings.hooks) settings.hooks = {};
+
+  for (const [eventName, eventHooks] of Object.entries(psychmemHooks.hooks)) {
+    if (!settings.hooks[eventName]) settings.hooks[eventName] = [];
+
+    for (const group of eventHooks) {
+      // Replace each hook command with the resolved path
+      const resolvedHooks = group.hooks.map((h) => ({
+        ...h,
+        command: hookCommand,
+      }));
+
+      const entry: Record<string, unknown> = { hooks: resolvedHooks };
+      if (group.matcher) entry['matcher'] = group.matcher;
+
+      // Avoid duplicate entries
+      const alreadyExists = (settings.hooks[eventName] as any[]).some(
+        (e: any) => e.hooks?.some((h: any) => (h.command as string)?.includes('psychmem'))
+      );
+      if (!alreadyExists) {
+        settings.hooks[eventName].push(entry);
+      }
+    }
+  }
+
+  // 5. Write back
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  console.log(`  ✓ Hooks merged into: ${settingsPath}`);
+  console.log(`  ✓ Using CLI at: ${cliPath}`);
+
+  console.log('\nClaude Code installation complete.');
+  console.log('Restart Claude Code to activate PsychMem.\n');
 }
 
 async function handleHook(psychmem: PsychMem, args: string[]) {
@@ -468,6 +649,10 @@ FLAGS:
                      Options: opencode, claude-code
 
 COMMANDS:
+  install            Install PsychMem (interactive - asks which agent)
+  install --opencode Install for OpenCode only
+  install --claude   Install for Claude Code only
+  install --both     Install for both agents
   hook <json>        Process a hook event (JSON as argument or stdin)
   list               List memories (default: active, sorted by strength)
                        --store stm|ltm    Filter by store
@@ -484,6 +669,14 @@ COMMANDS:
   help               Show this help message
 
 EXAMPLES:
+  # Install interactively
+  psychmem install
+
+  # Install for a specific agent
+  psychmem install --opencode
+  psychmem install --claude
+  psychmem install --both
+
   # List active memories
   psychmem list
 
