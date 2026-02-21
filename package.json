@@ -58,6 +58,7 @@
   "files": [
     "dist",
     "hooks",
+    "plugin.js",
     "plugin.json",
     "README.md"
   ],
