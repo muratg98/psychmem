@@ -78,6 +78,7 @@ export interface OpenCodeSession {
 
 /**
  * OpenCode message container (info + parts)
+ * Shape returned by client.session.messages()
  */
 export interface OpenCodeMessageContainer {
   info: OpenCodeMessageInfo;
@@ -85,28 +86,47 @@ export interface OpenCodeMessageContainer {
 }
 
 /**
- * OpenCode message info
+ * OpenCode message info (UserMessage | AssistantMessage from SDK)
  */
 export interface OpenCodeMessageInfo {
   id: string;
+  sessionID: string;
   role: 'user' | 'assistant';
-  created: string;
+  time: {
+    created: number;
+    completed?: number;
+  };
 }
 
 /**
- * OpenCode message part
+ * OpenCode message part (Part from SDK)
+ * Most relevant types:
+ *   - text:  { type: 'text', text: string }
+ *   - tool:  { type: 'tool', tool: string, state: ToolState }
  */
 export interface OpenCodeMessagePart {
-  type: 'text' | 'tool-invocation' | 'tool-result' | string;
+  type: 'text' | 'tool' | string;
+  /** Present on type='text' */
   text?: string;
-  /** Tool name for tool-invocation */
+  /** Present on type='tool' */
   tool?: string;
-  /** Tool arguments */
-  args?: unknown;
-  /** Tool result */
-  result?: unknown;
-  /** Error if tool failed */
+  /** Present on type='tool', contains input/output/error */
+  state?: OpenCodeToolState;
+}
+
+/**
+ * Tool state (completed or error)
+ */
+export interface OpenCodeToolState {
+  status: 'pending' | 'running' | 'completed' | 'error';
+  /** Present when status='completed' */
+  output?: string;
+  /** Present when status='completed' */
+  title?: string;
+  /** Present when status='error' */
   error?: string;
+  /** Input arguments (present when status='completed' or 'error') */
+  input?: Record<string, unknown>;
 }
 
 /**
@@ -155,16 +175,22 @@ export interface OpenCodeCompactionInput {
 }
 
 /**
- * OpenCode message.updated event properties (v1.9)
+ * OpenCode message.updated event properties
+ * SDK shape: { type: 'message.updated', properties: { info: Message } }
+ * Message has sessionID on info directly.
  */
 export interface OpenCodeMessageUpdatedEvent {
-  /** The message that was updated */
-  message?: OpenCodeMessageContainer;
-  /** Session ID the message belongs to */
+  /** The message info (UserMessage | AssistantMessage) */
+  info?: {
+    id?: string;
+    sessionID?: string;
+    role?: 'user' | 'assistant';
+  };
+  /** Fallback: some older SDK versions put sessionID at top level */
   sessionID?: string;
-  /** Message ID */
+  /** Message ID (legacy, may not be present) */
   messageID?: string;
-  /** Role of the message sender */
+  /** Role of the message sender (legacy) */
   role?: 'user' | 'assistant';
 }
 

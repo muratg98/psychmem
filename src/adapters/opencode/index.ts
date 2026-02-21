@@ -468,8 +468,10 @@ async function handleMessageUpdated(
   ctx: OpenCodePluginContext,
   eventProps: OpenCodeMessageUpdatedEvent
 ): Promise<void> {
-  const sessionId = eventProps.sessionID ?? state.currentSessionId;
-  debugLog(`handleMessageUpdated: sessionId=${sessionId ?? 'NONE'}, messageID=${eventProps.messageID ?? 'NONE'}, role=${eventProps.role ?? 'NONE'}`);
+  // SDK shape: properties = { info: Message }
+  // Message has sessionID directly on info
+  const sessionId = eventProps.info?.sessionID ?? eventProps.sessionID ?? state.currentSessionId;
+  debugLog(`handleMessageUpdated: sessionId=${sessionId ?? 'NONE'}, role=${eventProps.info?.role ?? eventProps.role ?? 'NONE'}`);
   
   if (!sessionId) {
     debugLog('handleMessageUpdated: no sessionId — BAILING');
@@ -638,39 +640,46 @@ async function handlePostToolUse(
 }
 
 /**
- * Extract conversation text from OpenCode messages
+ * Extract conversation text from OpenCode messages.
+ *
+ * SDK Part shapes (relevant ones):
+ *   - { type: 'text', text: string }
+ *   - { type: 'tool', tool: string, state: { status, output?, error?, input? } }
+ *
+ * We only include text turns and completed/errored tool calls —
+ * step-start/step-finish/snapshot/patch parts are skipped.
  */
 function extractConversationText(messages: OpenCodeMessageContainer[]): string {
   const lines: string[] = [];
-  
+
   for (const msg of messages) {
     const role = msg.info.role === 'user' ? 'Human' : 'Assistant';
-    
+
     for (const part of msg.parts) {
       if (part.type === 'text' && part.text) {
         lines.push(`${role}: ${part.text}`);
-      } else if (part.type === 'tool-invocation' && part.tool) {
-        lines.push(`Assistant: [Tool: ${part.tool}]`);
-        if (part.args) {
-          lines.push(`Input: ${JSON.stringify(part.args)}`);
-        }
-      } else if (part.type === 'tool-result') {
-        if (part.error) {
-          lines.push(`Tool Error: ${part.error}`);
-        } else if (part.result) {
-          const resultStr = typeof part.result === 'string' 
-            ? part.result 
-            : JSON.stringify(part.result);
-          // Truncate long tool results
-          const truncated = resultStr.length > 2000 
-            ? resultStr.slice(0, 2000) + '...[truncated]'
-            : resultStr;
-          lines.push(`Tool Result: ${truncated}`);
+      } else if (part.type === 'tool' && part.tool) {
+        const state = part.state;
+        if (!state) continue;
+
+        if (state.status === 'completed') {
+          lines.push(`Assistant: [Tool: ${part.tool}]`);
+          if (state.output) {
+            const truncated = state.output.length > 2000
+              ? state.output.slice(0, 2000) + '...[truncated]'
+              : state.output;
+            lines.push(`Tool Result: ${truncated}`);
+          }
+        } else if (state.status === 'error') {
+          lines.push(`Assistant: [Tool: ${part.tool}]`);
+          if (state.error) {
+            lines.push(`Tool Error: ${state.error}`);
+          }
         }
       }
     }
   }
-  
+
   return lines.join('\n');
 }
 

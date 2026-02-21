@@ -208,12 +208,40 @@ async function installForOpenCode() {
   // 1. Ensure plugins dir exists
   fs.mkdirSync(pluginsDir, { recursive: true });
 
-  // 2. Write plugin file
+  // 2. Write plugin file (mirrors plugin.js — includes env var config)
   const pluginFile = path.join(pluginsDir, 'psychmem.js');
   const pluginContent = `import { createOpenCodePlugin } from "psychmem/adapters/opencode";
 
+function parseEnvBool(value, defaultValue) {
+  if (value === undefined) return defaultValue;
+  return value.toLowerCase() === 'true' || value === '1';
+}
+
+function parseEnvNumber(value, defaultValue) {
+  if (value === undefined) return defaultValue;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+function parseEnvFloat(value, defaultValue) {
+  if (value === undefined) return defaultValue;
+  const parsed = parseFloat(value);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
 export const PsychMem = async (ctx) => {
-  return await createOpenCodePlugin(ctx);
+  const config = {
+    opencode: {
+      injectOnCompaction: parseEnvBool(process.env.PSYCHMEM_INJECT_ON_COMPACTION, true),
+      extractOnCompaction: parseEnvBool(process.env.PSYCHMEM_EXTRACT_ON_COMPACTION, true),
+      extractOnMessage: parseEnvBool(process.env.PSYCHMEM_EXTRACT_ON_MESSAGE, true),
+      maxCompactionMemories: parseEnvNumber(process.env.PSYCHMEM_MAX_COMPACTION_MEMORIES, 10),
+      maxSessionStartMemories: parseEnvNumber(process.env.PSYCHMEM_MAX_SESSION_MEMORIES, 10),
+      messageWindowSize: parseEnvNumber(process.env.PSYCHMEM_MESSAGE_WINDOW_SIZE, 3),
+      messageImportanceThreshold: parseEnvFloat(process.env.PSYCHMEM_MESSAGE_IMPORTANCE_THRESHOLD, 0.5),
+    },
+  };
+  return await createOpenCodePlugin(ctx, config);
 };
 `;
   fs.writeFileSync(pluginFile, pluginContent, 'utf8');
