@@ -311,51 +311,52 @@ export class ContextSweep {
   }
 
   /**
-   * Extract candidates from tool events (bugs, fixes, learnings)
-   * v1.5: Now uses multilingual patterns
+   * Extract candidates from tool events (bugs + fixes only).
+   *
+   * Only creates a memory when BOTH an error signal AND a resolution signal
+   * are present in the same event.  Plain file reads, grep output, diffs,
+   * and successful-but-unremarkable tool calls are deliberately ignored.
    */
   private extractFromToolEvents(events: Event[]): MemoryCandidate[] {
     const candidates: MemoryCandidate[] = [];
-    
+
+    // Patterns that indicate an actual error/problem occurred
+    const ERROR_PATTERN = /\b(error|exception|failed|failure|cannot|can't|undefined|null pointer|stack trace|traceback|syntax error|type error|reference error|uncaught)\b/i;
+
+    // Patterns that indicate the problem was understood or resolved
+    const RESOLUTION_PATTERN = /\b(fixed|resolved|solved|corrected|updated|changed|now works|working|success|done|applied|patched)\b/i;
+
     for (const event of events) {
-      const content = `${event.toolName ?? ''} ${event.toolInput ?? ''} ${event.toolOutput ?? ''}`;
-      const signals: ImportanceSignal[] = [];
-      
-      // Use multilingual patterns
-      if (this.config.enableRegexPatterns) {
-        const regexSignals = matchAllPatterns(content);
-        signals.push(...regexSignals);
-      }
-      
-      // Add structural signals for tool output
-      if (this.config.enableStructuralAnalysis) {
-        const structuralSignals = analyzeStructuralSignals(content);
-        for (const signal of structuralSignals) {
-          signal.weight *= this.config.structuralWeight;
-        }
-        signals.push(...structuralSignals);
-      }
-      
-      // Only create candidates for significant events
-      if (signals.length > 0) {
-        const significantSignals = signals.filter(s => s.weight >= this.config.signalThreshold);
-        if (significantSignals.length === 0) continue;
-        
-        const classification = this.classifyContentMultilingual(content, significantSignals);
-        const summary = this.generateToolSummary(event, classification);
-        
-        candidates.push({
-          summary,
-          classification,
-          sourceEventIds: [event.id],
-          importanceSignals: significantSignals,
-          preliminaryImportance: this.calculatePreliminaryImportance(significantSignals),
-          extractionMethod: 'tool_event_analysis',
-          confidence: 0.6,
-        });
-      }
+      const toolOutput = event.toolOutput ?? '';
+      const toolInput  = event.toolInput  ?? '';
+
+      // Require BOTH an error signal AND a resolution/fix signal.
+      // Without both, the event is not worth storing as a memory.
+      const hasError      = ERROR_PATTERN.test(toolOutput) || ERROR_PATTERN.test(toolInput);
+      const hasResolution = RESOLUTION_PATTERN.test(toolOutput) || RESOLUTION_PATTERN.test(toolInput);
+
+      if (!hasError || !hasResolution) continue;
+
+      // Build a minimal, meaningful signal set — only bug_fix/tool_failure types
+      const signals: ImportanceSignal[] = [
+        {
+          type: 'bug_fix' as ImportanceSignalType,
+          source: event.toolName ?? 'tool',
+          weight: 0.75,
+        },
+      ];
+
+      candidates.push({
+        summary: this.generateToolSummary(event, 'bugfix'),
+        classification: 'bugfix',
+        sourceEventIds: [event.id],
+        importanceSignals: signals,
+        preliminaryImportance: 0.75,
+        extractionMethod: 'tool_event_analysis',
+        confidence: 0.65,
+      });
     }
-    
+
     return candidates;
   }
 
@@ -502,24 +503,33 @@ export class ContextSweep {
   }
 
   /**
-   * Generate summary for tool events
+   * Generate summary for tool events.
+   *
+   * Derives a human-readable description from the tool name and the
+   * error/resolution signals — does NOT dump raw tool output into the
+   * summary, which would produce noise like "🔴 read: <path>C:\...".
    */
   private generateToolSummary(event: Event, classification: MemoryClassification): string {
     const emoji = this.getClassificationEmoji(classification);
-    const toolName = event.toolName ?? 'unknown tool';
-    
-    // Prefer toolOutput (clean result text) over the noisy concatenated event.content
-    const cleanContent = (event.toolOutput?.trim() || event.toolInput?.trim() || event.content).slice(0, 200);
-    
-    if (classification === 'bugfix') {
-      // Try to extract the error and fix from tool output
-      const errorMatch = event.toolOutput?.match(/error|exception|failed/i);
-      if (errorMatch) {
-        return `${emoji} ${toolName}: ${event.toolOutput?.slice(0, 200) ?? 'error encountered'}`;
-      }
+    const toolName = event.toolName ?? 'tool';
+
+    // Try to extract just the error message line (first line matching error keywords)
+    const errorLine = (event.toolOutput ?? '')
+      .split('\n')
+      .map(l => l.trim())
+      .find(l => /\b(error|exception|failed|failure|cannot|can't)\b/i.test(l));
+
+    if (errorLine) {
+      // Truncate and clean — no raw file paths if we can avoid it
+      const cleaned = errorLine
+        .replace(/[A-Za-z]:\\[^\s:,]+/g, '<path>') // collapse Windows absolute paths
+        .replace(/\/[^\s:,]{10,}/g, '<path>')       // collapse Unix absolute paths
+        .slice(0, 200);
+      return `${emoji} ${toolName} error fixed: ${cleaned}`;
     }
-    
-    return `${emoji} ${toolName}: ${cleanContent}`;
+
+    // Fallback: generic description without raw content
+    return `${emoji} ${toolName} error encountered and resolved`;
   }
 
   /**

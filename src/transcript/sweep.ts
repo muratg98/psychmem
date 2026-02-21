@@ -104,14 +104,22 @@ export class TranscriptSweep {
 
   /**
    * Extract memory candidates from conversation text
-   * Creates synthetic events for context sweep compatibility
+   * Creates synthetic events for context sweep compatibility.
+   * Only user_message and assistant_message entries are turned into events —
+   * tool_use / tool_result entries contain raw file/grep/diff output that
+   * fires patterns on irrelevant tokens and produces junk memories.
    */
   private extractFromText(
     text: string,
     entries: TranscriptEntry[]
   ): MemoryCandidate[] {
+    // Filter to conversational turns only; skip tool I/O entries
+    const conversationalEntries = entries.filter(
+      e => e.type === 'user_message' || e.type === 'assistant_message'
+    );
+
     // Create synthetic events for the context sweep
-    const syntheticEvents = entries.map((entry, index) => ({
+    const syntheticEvents = conversationalEntries.map((entry, index) => ({
       id: `transcript-${index}`,
       sessionId: 'transcript',
       hookType: this.entryTypeToHookType(entry.type),
