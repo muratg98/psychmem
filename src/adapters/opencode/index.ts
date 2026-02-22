@@ -106,6 +106,7 @@ interface OpenCodeAdapterState {
   currentSessionId: string | null;
   worktree: string;
   client: OpenCodeClient;
+  injectedSessions: Set<string>; // Track which sessions have received memory injection
 }
 
 /**
@@ -142,6 +143,7 @@ export async function createOpenCodePlugin(
     currentSessionId: null,
     worktree,
     client: ctx.client,
+    injectedSessions: new Set<string>(),
   };
   
   // Log initialization
@@ -293,7 +295,8 @@ async function handleSessionCreated(
   }
   
   state.currentSessionId = sessionId;
-  debugLog(`state.currentSessionId set to: ${sessionId}`);
+  state.injectedSessions.add(sessionId); // Mark as already injected (new sessions get immediate injection)
+  debugLog(`state.currentSessionId set to: ${sessionId}, marked as injected`);
   
   // Create session in PsychMem
   const hookInput: HookInput = {
@@ -471,11 +474,33 @@ async function handleMessageUpdated(
   // SDK shape: properties = { info: Message }
   // Message has sessionID directly on info
   const sessionId = eventProps.info?.sessionID ?? eventProps.sessionID ?? state.currentSessionId;
-  debugLog(`handleMessageUpdated: sessionId=${sessionId ?? 'NONE'}, role=${eventProps.info?.role ?? eventProps.role ?? 'NONE'}`);
+  const role = eventProps.info?.role ?? eventProps.role;
+  debugLog(`handleMessageUpdated: sessionId=${sessionId ?? 'NONE'}, role=${role ?? 'NONE'}`);
   
   if (!sessionId) {
     debugLog('handleMessageUpdated: no sessionId — BAILING');
     return;
+  }
+  
+  // LAZY INJECTION: Inject memories on first user message in continued session
+  // This ensures memories are injected when the user starts interacting,
+  // not just when a new session is created (which doesn't happen for continued sessions via -c flag)
+  if (role === 'user' && !state.injectedSessions.has(sessionId)) {
+    state.injectedSessions.add(sessionId);
+    debugLog(`Lazy injection: first user message in session ${sessionId}`);
+    
+    // Inject relevant memories
+    const memories = await getRelevantMemories(
+      state,
+      state.config.opencode.maxSessionStartMemories
+    );
+    
+    if (memories.length > 0) {
+      const memoryContext = formatMemoriesForInjection(memories, 'session_start', state.worktree);
+      await injectContext(state, sessionId, memoryContext);
+      debugLog(`Lazy injection: injected ${memories.length} memories`);
+      log(ctx, 'info', `Lazy injection: ${memories.length} memories on continued session`);
+    }
   }
   
   // Update state if needed

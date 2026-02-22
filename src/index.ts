@@ -227,3 +227,76 @@ export type {
 // Re-export adapters
 export { createOpenCodePlugin, OpenCodeAdapter } from './adapters/opencode/index.js';
 export { ClaudeCodeAdapter, createClaudeCodeAdapter } from './adapters/claude-code/index.js';
+
+// Import for default export (must be after re-exports to avoid circular dependency issues)
+import { createOpenCodePlugin } from './adapters/opencode/index.js';
+
+// =============================================================================
+// Default export for OpenCode plugin system
+// =============================================================================
+// When OpenCode loads "psychmem" via "plugin": ["psychmem"], it expects
+// the default export to be an async function that accepts context and returns hooks.
+// This wrapper provides the same interface as plugin.js for npm installs.
+
+import type { OpenCodePluginContext, OpenCodePluginHooks } from './adapters/types.js';
+
+/**
+ * Parse boolean environment variable
+ */
+function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue;
+  return value.toLowerCase() === 'true' || value === '1';
+}
+
+/**
+ * Parse number environment variable
+ */
+function parseEnvNumber(value: string | undefined, defaultValue: number): number {
+  if (value === undefined) return defaultValue;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+/**
+ * Parse float environment variable
+ */
+function parseEnvFloat(value: string | undefined, defaultValue: number): number {
+  if (value === undefined) return defaultValue;
+  const parsed = parseFloat(value);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+/**
+ * OpenCode plugin entry point (default export)
+ * 
+ * This is the entry point used when OpenCode loads the plugin via:
+ * {
+ *   "plugin": ["psychmem"]
+ * }
+ * 
+ * Configuration via environment variables:
+ * - PSYCHMEM_INJECT_ON_COMPACTION: Enable memory injection during compaction (default: true)
+ * - PSYCHMEM_EXTRACT_ON_COMPACTION: Enable memory extraction during compaction (default: true)
+ * - PSYCHMEM_EXTRACT_ON_MESSAGE: Enable per-message memory extraction (default: true)
+ * - PSYCHMEM_MAX_COMPACTION_MEMORIES: Max memories to inject on compaction (default: 10)
+ * - PSYCHMEM_MAX_SESSION_MEMORIES: Max memories to inject on session start (default: 10)
+ * - PSYCHMEM_MESSAGE_WINDOW_SIZE: Number of recent messages for context (default: 3)
+ * - PSYCHMEM_MESSAGE_IMPORTANCE_THRESHOLD: Min importance for per-message extraction (default: 0.5)
+ */
+export default async function PsychMemPlugin(
+  ctx: OpenCodePluginContext
+): Promise<OpenCodePluginHooks> {
+  const config: Partial<PsychMemConfig> = {
+    opencode: {
+      injectOnCompaction: parseEnvBool(process.env.PSYCHMEM_INJECT_ON_COMPACTION, true),
+      extractOnCompaction: parseEnvBool(process.env.PSYCHMEM_EXTRACT_ON_COMPACTION, true),
+      extractOnMessage: parseEnvBool(process.env.PSYCHMEM_EXTRACT_ON_MESSAGE, true),
+      maxCompactionMemories: parseEnvNumber(process.env.PSYCHMEM_MAX_COMPACTION_MEMORIES, 10),
+      maxSessionStartMemories: parseEnvNumber(process.env.PSYCHMEM_MAX_SESSION_MEMORIES, 10),
+      messageWindowSize: parseEnvNumber(process.env.PSYCHMEM_MESSAGE_WINDOW_SIZE, 3),
+      messageImportanceThreshold: parseEnvFloat(process.env.PSYCHMEM_MESSAGE_IMPORTANCE_THRESHOLD, 0.5),
+    },
+  };
+
+  return createOpenCodePlugin(ctx, config);
+}
