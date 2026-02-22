@@ -38,3 +38,6 @@ Thumbs.db
 # Temporary folders
 tmp/
 temp/
+
+# Local documentation (fork-specific)
+AGENTS.md
