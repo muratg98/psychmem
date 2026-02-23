@@ -90,7 +90,10 @@ async function createBunDatabase(dbPath: string): Promise<SqliteDatabase> {
  */
 async function createNodeDatabase(dbPath: string): Promise<SqliteDatabase> {
   // node:sqlite is synchronous — dynamic import keeps the async adapter signature uniform
-  const { DatabaseSync } = await import('node:sqlite' as string);
+  // Use a computed string to prevent Bun's static resolver from eagerly resolving this
+  // (Bun fails on 'node:sqlite' even in unreachable code paths)
+  const nodesqlite = 'node:' + 'sqlite';
+  const { DatabaseSync } = await import(nodesqlite);
   const db = new DatabaseSync(dbPath);
 
   return {
