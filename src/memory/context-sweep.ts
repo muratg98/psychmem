@@ -99,6 +99,16 @@ export class ContextSweep {
     let prevChunkHadToolError = false;
     
     for (const chunk of chunks) {
+      // Skip tool output and assistant-generated chunks — only user text
+      // contains genuine preferences, decisions, constraints, etc.
+      const chunkRole = this.detectChunkRole(chunk);
+      if (chunkRole === 'tool') continue;
+      if (chunkRole === 'assistant') {
+        // Track tool errors from assistant tool-use markers but don't extract
+        prevChunkHadToolError = this.chunkHasToolError(chunk);
+        continue;
+      }
+
       const signals: ImportanceSignal[] = [];
       let hasRegexSignal = false;
       let hasStructuralSignal = false;

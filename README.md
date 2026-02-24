@@ -30,11 +30,7 @@ If you run into issues, please [open an issue](https://github.com/muratg98/psych
 
 ### OpenCode
 
-```bash
-npm install -g psychmem
-```
-
-Then add to your OpenCode config (`~/.config/opencode/opencode.json`):
+Add to your OpenCode config (`~/.config/opencode/opencode.json` or `opencode.json` in your project root):
 
 ```json
 {
@@ -42,9 +38,9 @@ Then add to your OpenCode config (`~/.config/opencode/opencode.json`):
 }
 ```
 
-Restart OpenCode and you're ready to go.
+Restart OpenCode — it will automatically install the package from npm via Bun at startup. No manual `npm install` needed.
 
-Optionally, pin to a specific version:
+To pin to a specific version:
 
 ```json
 {

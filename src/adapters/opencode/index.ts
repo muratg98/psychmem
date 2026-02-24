@@ -735,28 +735,36 @@ async function handlePostToolUse(
 function extractConversationText(messages: OpenCodeMessageContainer[]): string {
   const lines: string[] = [];
 
+  // Headers used for injected memory blocks — must be stripped to prevent
+  // memories from re-extracting themselves in a feedback loop
+  const MEMORY_BLOCK_HEADERS = [
+    '## Relevant Memories from Previous Sessions',
+    '## Preserved Memories (from PsychMem)',
+  ];
+
   for (const msg of messages) {
     const role = msg.info.role === 'user' ? 'Human' : 'Assistant';
 
     for (const part of msg.parts) {
       if (part.type === 'text' && part.text) {
-        lines.push(`${role}: ${part.text}`);
+        // Skip injected memory blocks entirely
+        const text = part.text;
+        if (MEMORY_BLOCK_HEADERS.some(h => text.includes(h))) continue;
+        lines.push(`${role}: ${text}`);
       } else if (part.type === 'tool' && part.tool) {
         const state = part.state;
         if (!state) continue;
 
         if (state.status === 'completed') {
-          lines.push(`Assistant: [Tool: ${part.tool}]`);
-          if (state.output) {
-            const truncated = state.output.length > 2000
-              ? state.output.slice(0, 2000) + '...[truncated]'
-              : state.output;
-            lines.push(`Tool Result: ${truncated}`);
-          }
+          // Only include tool name — raw output is noise (file contents,
+          // grep results, etc.) that pollutes memory extraction
+          lines.push(`Assistant: [Used tool: ${part.tool}]`);
         } else if (state.status === 'error') {
           lines.push(`Assistant: [Tool: ${part.tool}]`);
           if (state.error) {
-            lines.push(`Tool Error: ${state.error}`);
+            // Keep first line of error — useful for bugfix memories
+            const errorOneLiner = state.error.split('\n')[0]?.slice(0, 200) || '';
+            lines.push(`Tool Error: ${errorOneLiner}`);
           }
         }
       }

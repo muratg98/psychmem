@@ -179,8 +179,9 @@ export class PsychMem {
 	 */
 	close() {
 		if (this.initialized) {
+			// Only close db here — hooks shares the same db instance,
+			// so calling hooks.close() would double-close and throw
 			this.db.close();
-			this.hooks.close();
 		}
 	}
 
