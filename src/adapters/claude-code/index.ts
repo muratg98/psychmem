@@ -19,7 +19,7 @@ import { join, basename } from 'path';
 import type { PsychMemAdapter } from '../types.js';
 import type { PsychMemConfig, MemoryUnit, MemoryClassification } from '../../types/index.js';
 import { DEFAULT_CONFIG, USER_LEVEL_CLASSIFICATIONS, getScopeForClassification } from '../../types/index.js';
-import { PsychMem, createPsychMem } from '../../index.js';
+import { PsychMem, createPsychMem } from '../../core.js';
 import { MemoryDatabase, createMemoryDatabase } from '../../storage/database.js';
 import { MemoryRetrieval } from '../../retrieval/index.js';
 
@@ -484,4 +484,4 @@ export function getClaudeCodeProjectId(projectPath: string): string {
   return projectPathToId(projectPath);
 }
 
-export default ClaudeCodeAdapter;
+export default createClaudeCodeAdapter;

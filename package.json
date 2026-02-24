@@ -13,6 +13,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    },
     "./plugin": {
       "import": "./plugin.js"
     },
@@ -59,6 +63,7 @@
   "author": "muratg98",
   "license": "MIT",
   "files": [
+    ".claude-plugin",
     "dist",
     "hooks",
     "plugin.js",

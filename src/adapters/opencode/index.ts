@@ -33,7 +33,7 @@ import type {
   SessionStartData,
 } from '../../types/index.js';
 import { DEFAULT_CONFIG, getScopeForClassification } from '../../types/index.js';
-import { PsychMem, createPsychMem } from '../../index.js';
+import { PsychMem, createPsychMem } from '../../core.js';
 import { MemoryDatabase, createMemoryDatabase } from '../../storage/database.js';
 import { MemoryRetrieval } from '../../retrieval/index.js';
 
@@ -1013,16 +1013,22 @@ function log(
   message: string,
   extra?: unknown
 ): void {
-  ctx.client.app.log({
-    body: {
-      service: 'psychmem',
-      level,
-      message,
-      extra,
-    },
-  }).catch(() => {
-    // Logging is best-effort
-  });
+  try {
+    if (ctx?.client?.app?.log) {
+      ctx.client.app.log({
+        body: {
+          service: 'psychmem',
+          level,
+          message,
+          extra,
+        },
+      }).catch(() => {});
+    } else {
+      debugLog(`[${level}] ${message}${extra ? ' ' + JSON.stringify(extra) : ''}`);
+    }
+  } catch (_) {
+    debugLog(`[${level}] (log fallback) ${message}`);
+  }
 }
 
 /**

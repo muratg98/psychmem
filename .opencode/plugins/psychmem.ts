@@ -70,7 +70,7 @@ export const PsychMemPlugin = async (ctx: OpenCodePluginContext): Promise<OpenCo
         process.env.PSYCHMEM_EXTRACT_ON_COMPACTION,
         true
       ),
-      extractOnMessage: parseEnvBool(
+      extractOnUserMessage: parseEnvBool(
         process.env.PSYCHMEM_EXTRACT_ON_MESSAGE,
         true
       ),
@@ -96,7 +96,7 @@ export const PsychMemPlugin = async (ctx: OpenCodePluginContext): Promise<OpenCo
   try {
     const hooks = await createOpenCodePlugin(ctx, config);
     console.log('[PsychMem] Plugin initialized successfully');
-    console.log('[PsychMem] Per-message extraction:', config.opencode?.extractOnMessage ? 'enabled' : 'disabled');
+    console.log('[PsychMem] Per-message extraction:', config.opencode?.extractOnUserMessage ? 'enabled' : 'disabled');
     return hooks;
   } catch (error) {
     console.error('[PsychMem] Failed to initialize:', error);

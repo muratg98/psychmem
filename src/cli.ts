@@ -25,7 +25,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { PsychMem, createPsychMem } from './index.js';
+import { PsychMem, createPsychMem } from './core.js';
 import type { HookInput } from './types/index.js';
 import { TranscriptParser } from './transcript/parser.js';
 
@@ -384,10 +384,10 @@ async function handleHook(psychmem: PsychMem, args: string[]) {
         }));
       } else {
         // For Stop/SessionEnd, just output status (not blocking)
-        console.log(JSON.stringify({ success: true }));
+        console.log(JSON.stringify({ continue: true }));
       }
     } else {
-      console.log(JSON.stringify({ success: true }));
+      console.log(JSON.stringify({ continue: true }));
     }
   } else {
     // Don't block on errors, just log

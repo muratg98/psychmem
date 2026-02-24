@@ -1,7 +1,7 @@
 {
   "name": "psychmem",
   "displayName": "PsychMem",
-  "version": "1.0.0",
+  "version": "1.0.8",
   "description": "Psych-grounded selective memory system - implements human-like memory with STM/LTM consolidation, decay curves, importance scoring, and interference handling",
   "author": "MGRyko",
   "repository": "https://github.com/muratg98/psychmem",
