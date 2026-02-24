@@ -30,7 +30,11 @@ If you run into issues, please [open an issue](https://github.com/muratg98/psych
 
 ### OpenCode
 
-Add to your OpenCode config (`~/.config/opencode/opencode.json`):
+```bash
+npm install -g psychmem
+```
+
+Then add to your OpenCode config (`~/.config/opencode/opencode.json`):
 
 ```json
 {
@@ -44,7 +48,7 @@ Optionally, pin to a specific version:
 
 ```json
 {
-  "plugin": ["psychmem@1.0.8"]
+  "plugin": ["psychmem@1.0.9"]
 }
 ```
 
