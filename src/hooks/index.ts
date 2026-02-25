@@ -152,18 +152,14 @@ export class PsychMemHooks {
   private handleSessionStart(input: HookInput): HookOutput {
     const data = input.data as SessionStartData;
     
-    // Extract transcriptPath from metadata if provided
-    const transcriptPath = (data.metadata as Record<string, unknown> | undefined)?.transcriptPath as string | undefined;
-    
-    // Create new session with external ID mapping and transcript path
+    // Create new session
     const session = this.db.createSession(
       data.project, 
       {
         workingDirectory: data.workingDirectory,
         externalSessionId: input.sessionId, // Store external ID for CLI persistence
         ...data.metadata,
-      },
-      transcriptPath
+      }
     );
     this.currentSessionId = session.id;
     
@@ -300,18 +296,12 @@ export class PsychMemHooks {
     
     const data = input.data as StopData;
     
-    // Process the session and extract memories (async for transcript parsing)
+    // Process the session and extract memories
     const result = await this.stopHook.process(sessionId, data);
-    
-    // Build context summary with transcript stats if available
-    let contextSummary = result.summary;
-    if (result.transcriptStats) {
-      contextSummary += `\n\n[Transcript: ${result.transcriptStats.rawCandidates} raw → ${result.transcriptStats.afterDedup} after dedup → ${result.memoriesCreated} stored]`;
-    }
     
     return {
       success: true,
-      context: contextSummary,
+      context: result.summary,
       memoriesCreated: result.memoriesCreated,
     };
   }

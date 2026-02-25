@@ -10,7 +10,7 @@
 /**
  * Supported AI agent types
  */
-export type AgentType = 'claude-code' | 'opencode';
+export type AgentType = 'opencode';
 
 // =============================================================================
 // Memory Types (Psychological Framing)
@@ -108,10 +108,6 @@ export interface Session {
   endedAt?: Date | undefined;
   status: 'active' | 'completed' | 'abandoned';
   metadata?: Record<string, unknown> | undefined;
-  
-  // Transcript tracking for incremental parsing (Claude Code)
-  transcriptPath?: string | undefined;
-  transcriptWatermark?: number | undefined; // Byte offset of last processed position
   
   // Message tracking for incremental parsing (OpenCode)
   messageWatermark?: number | undefined; // Index of last processed message (0-indexed)
@@ -428,7 +424,7 @@ export interface SweepConfig {
 
 export const DEFAULT_SWEEP_CONFIG: SweepConfig = {
   structuralWeight: 1.0,
-  signalThreshold: 0.3,
+  signalThreshold: 0.5,  // Raised from 0.3 — structural signals (code blocks, file paths at 0.25) no longer pass alone
   enableRegexPatterns: true,
   enableStructuralAnalysis: true,
   regexConfidence: 0.75,
@@ -455,7 +451,7 @@ export interface OpenCodeConfig {
   maxSessionStartMemories: number;
   /** Number of recent messages to include for context in per-message extraction (default: 3) */
   messageWindowSize: number;
-  /** Minimum importance threshold for per-message extraction (default: 0.1 ≈ 1 of 7 signal groups) */
+  /** Minimum importance threshold for per-message extraction (default: 0.3 ≈ 2 of 7 signal groups) */
   messageImportanceThreshold: number;
 }
 
@@ -497,7 +493,7 @@ export interface PsychMemConfig {
 }
 
 export const DEFAULT_CONFIG: PsychMemConfig = {
-  agentType: 'claude-code',  // Default for backwards compatibility
+  agentType: 'opencode',
   dbPath: '~/.psychmem/{agentType}/memory.db',  // Template with agent type
   
   stmDecayRate: 0.05,     // ~32-hour half-life (doubled from 0.1)
@@ -521,8 +517,8 @@ export const DEFAULT_CONFIG: PsychMemConfig = {
   
   autoPromoteToLtm: ['bugfix', 'learning', 'decision'],
   
-  // Transcript parsing (Miller's Law: 7±2 items)
-  maxMemoriesPerStop: 7,
+  // Transcript parsing (reduced from 7 — Miller's Law is generous, 4 keeps quality high)
+  maxMemoriesPerStop: 4,
   deduplicationThreshold: 0.7, // 70% keyword overlap = duplicate
   
   // Context sweep settings
@@ -536,6 +532,6 @@ export const DEFAULT_CONFIG: PsychMemConfig = {
     maxCompactionMemories: 10,
     maxSessionStartMemories: 10,
     messageWindowSize: 3,    // Include last 3 messages for context
-    messageImportanceThreshold: 0.1,   // At least 1 of 7 pattern groups must match (1/7 ≈ 0.14)
+    messageImportanceThreshold: 0.3,   // At least 2 of 7 pattern groups must match (raised from 0.1)
   },
 };

@@ -138,8 +138,8 @@ export const CORRECTION: PatternCategory = {
   signalType: 'correction',
   weight: 0.7,
   latin: [
-    // English
-    'actually', 'wait', 'no,', 'correction', 'wrong', 'mistake', 'oops',
+    // English — removed 'actually' (too common in normal explanatory speech)
+    'wait', 'no,', 'correction', 'wrong', 'mistake', 'oops',
     'sorry, I meant', 'let me correct', 'that\'s not right', 'I was wrong',
     'my bad', 'scratch that', 'disregard',
     // Spanish
@@ -191,31 +191,32 @@ export const PREFERENCE: PatternCategory = {
   signalType: 'preference',
   weight: 0.6,
   latin: [
-    // English
-    'prefer', 'like', 'want', 'don\'t like', 'hate', 'avoid',
+    // English — removed 'like' and 'want' (too common in normal conversation)
+    'prefer', 'don\'t like', 'hate', 'avoid',
     'I\'d rather', 'better if', 'instead of', 'rather than',
+    'I prefer', 'my preference', 'I dislike',
     // Spanish
-    'prefiero', 'me gusta', 'quiero', 'no me gusta', 'odio', 'evitar',
+    'prefiero', 'no me gusta', 'odio', 'evitar',
     'preferiría', 'mejor si',
     // French
-    'je préfère', 'j\'aime', 'je veux', 'je n\'aime pas', 'je déteste', 'éviter',
+    'je préfère', 'je n\'aime pas', 'je déteste', 'éviter',
     'plutôt', 'mieux si',
     // German
-    'bevorzuge', 'mag', 'will', 'mag nicht', 'hasse', 'vermeiden',
+    'bevorzuge', 'mag nicht', 'hasse', 'vermeiden',
     'lieber', 'besser wenn',
     // Portuguese
-    'prefiro', 'gosto', 'quero', 'não gosto', 'odeio', 'evitar',
+    'prefiro', 'não gosto', 'odeio', 'evitar',
     'preferiria', 'melhor se',
     // Italian
-    'preferisco', 'mi piace', 'voglio', 'non mi piace', 'odio', 'evitare',
+    'preferisco', 'non mi piace', 'odio', 'evitare',
     'piuttosto', 'meglio se',
     // Dutch
-    'ik geef de voorkeur', 'ik hou van', 'ik wil', 'ik haat', 'vermijden',
+    'ik geef de voorkeur', 'ik haat', 'vermijden',
     'liever', 'beter als',
     // Turkish
-    'tercih ederim', 'seviyorum', 'istiyorum', 'sevmiyorum', 'nefret', 'kaçınmak',
+    'tercih ederim', 'sevmiyorum', 'nefret', 'kaçınmak',
     // Polish
-    'wolę', 'lubię', 'chcę', 'nie lubię', 'nienawidzę', 'unikać',
+    'wolę', 'nie lubię', 'nienawidzę', 'unikać',
     'lepiej gdyby',
   ],
   nonLatin: [
@@ -334,27 +335,28 @@ export const BUG_FIX: PatternCategory = {
   signalType: 'bug_fix',
   weight: 0.8,
   latin: [
-    // English
-    'bug', 'error', 'exception', 'crash', 'fail', 'broken', 'issue',
-    'fix', 'fixed', 'resolved', 'solved', 'patched', 'workaround',
-    'TypeError', 'ReferenceError', 'SyntaxError', 'null', 'undefined',
-    'stack trace', 'traceback', 'segfault', 'memory leak',
-    // Spanish
-    'error', 'excepción', 'fallo', 'roto', 'problema', 'arreglado', 'solucionado',
+    // English — removed generic 'error', 'fix', 'fixed', 'issue', 'null', 'undefined', 'fail', 'broken'
+    // (too common in programming discussions). Kept specific compound terms only.
+    'found a bug', 'this is broken', 'crash on', 'crashes when', 'fails when',
+    'exception thrown', 'exception occurs', 'TypeError', 'ReferenceError', 'SyntaxError',
+    'NullPointerException', 'stack trace', 'traceback', 'segfault', 'memory leak',
+    'workaround', 'patched', 'bug fix', 'hotfix',
+    // Spanish — specific phrases only
+    'excepción lanzada', 'traza de pila', 'fallo del sistema', 'solución alternativa',
     // French
-    'erreur', 'exception', 'plantage', 'cassé', 'problème', 'corrigé', 'résolu',
+    'exception levée', 'trace de pile', 'plantage système', 'solution de contournement',
     // German
-    'fehler', 'ausnahme', 'absturz', 'kaputt', 'problem', 'behoben', 'gelöst',
+    'ausnahme geworfen', 'stapelüberlauf', 'systemabsturz', 'workaround',
     // Portuguese
-    'erro', 'exceção', 'falha', 'quebrado', 'problema', 'corrigido', 'resolvido',
+    'exceção lançada', 'rastreamento de pilha', 'falha do sistema', 'solução alternativa',
     // Italian
-    'errore', 'eccezione', 'crash', 'rotto', 'problema', 'risolto', 'corretto',
+    'eccezione lanciata', 'traccia dello stack', 'arresto anomalo', 'soluzione alternativa',
     // Dutch
-    'fout', 'uitzondering', 'crash', 'kapot', 'probleem', 'opgelost', 'gerepareerd',
+    'uitzondering gegooid', 'stack trace', 'systeemcrash', 'tijdelijke oplossing',
     // Turkish
-    'hata', 'istisna', 'çökme', 'bozuk', 'sorun', 'düzeltildi', 'çözüldü',
+    'istisna fırlatıldı', 'yığın izi', 'sistem çökmesi', 'geçici çözüm',
     // Polish
-    'błąd', 'wyjątek', 'awaria', 'zepsuty', 'problem', 'naprawiono', 'rozwiązano',
+    'wyjątek wyrzucony', 'ślad stosu', 'awaria systemu', 'obejście problemu',
   ],
   nonLatin: [
     // Japanese
@@ -454,10 +456,10 @@ export const ALL_PATTERNS: PatternCategory[] = [
 export const CLASSIFICATION_PATTERNS = {
   bugfix: {
     latin: [
-      'bug', 'error', 'exception', 'crash', 'fail', 'broken', 'issue',
-      'fix', 'fixed', 'resolved', 'solved', 'patched', 'workaround',
-      'TypeError', 'ReferenceError', 'SyntaxError', 'null pointer',
-      'stack trace', 'traceback', 'segfault',
+      'found a bug', 'this is broken', 'crash on', 'crashes when', 'fails when',
+      'exception thrown', 'exception occurs', 'TypeError', 'ReferenceError', 'SyntaxError',
+      'NullPointerException', 'stack trace', 'traceback', 'segfault', 'memory leak',
+      'workaround', 'patched', 'bug fix', 'hotfix',
     ],
     nonLatin: [
       'バグ', 'エラー', '修正', '解決',
@@ -512,8 +514,9 @@ export const CLASSIFICATION_PATTERNS = {
   },
   preference: {
     latin: [
-      'prefer', 'like', 'want', 'don\'t like', 'hate', 'avoid',
-      'I\'d rather', 'better if', 'always',
+      // Removed 'like', 'want', 'always' — too common
+      'prefer', 'don\'t like', 'hate', 'avoid',
+      'I\'d rather', 'better if', 'I prefer', 'my preference', 'I dislike',
     ],
     nonLatin: [
       '好き', '嫌い', '好み',

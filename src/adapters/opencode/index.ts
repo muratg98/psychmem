@@ -130,7 +130,7 @@ export function parsePluginConfig(): Partial<PsychMemConfig> {
       maxCompactionMemories:       parseEnvNumber(process.env['PSYCHMEM_MAX_COMPACTION_MEMORIES'],      10),
       maxSessionStartMemories:     parseEnvNumber(process.env['PSYCHMEM_MAX_SESSION_MEMORIES'],         10),
       messageWindowSize:           parseEnvNumber(process.env['PSYCHMEM_MESSAGE_WINDOW_SIZE'],          3),
-      messageImportanceThreshold:  parseEnvFloat (process.env['PSYCHMEM_MESSAGE_IMPORTANCE_THRESHOLD'], 0.1),
+      messageImportanceThreshold:  parseEnvFloat (process.env['PSYCHMEM_MESSAGE_IMPORTANCE_THRESHOLD'], 0.3),
     },
   };
 }
@@ -261,10 +261,12 @@ export async function createOpenCodePlugin(
 
     /**
      * Fires exactly once per user turn, before the assistant starts responding.
-     * 
+     *
      * Two responsibilities:
-     * 1. LAZY INJECTION — for continued sessions (-c flag) that skip session.created,
-     *    inject memories on the first user message of the session.
+     * 1. LAZY INJECTION — single injection path for ALL sessions (new or continued).
+     *    On the first user message of any session, inject memories before the assistant
+     *    responds. This handles both fresh sessions (session.created fires but no user
+     *    message yet) and continued sessions (-c flag, which skips session.created).
      * 2. PER-MESSAGE EXTRACTION — fire-and-forget extraction after each user message.
      *    Only runs when extractOnUserMessage is enabled and the message passes
      *    the importance pre-filter (positive signals present, not a pure task command).
@@ -345,8 +347,9 @@ async function handleSessionCreated(
   }
   
   state.currentSessionId = sessionId;
-  // Mark new session injected immediately — injection happens below before returning
-  state.injectedSessions.add(sessionId);
+  // Do NOT pre-mark as injected here — let chat.message handle injection lazily.
+  // This ensures injection always happens in the correct position (just before
+  // the first user message), whether the session was freshly created or continued.
   debugLog(`state.currentSessionId set to: ${sessionId}`);
   
   // Create session in PsychMem
@@ -362,18 +365,6 @@ async function handleSessionCreated(
   };
   
   await state.psychmem.handleHook(hookInput);
-  
-  // Inject relevant memories on session start
-  const memories = await getRelevantMemories(
-    state,
-    state.config.opencode.maxSessionStartMemories
-  );
-  
-  if (memories.length > 0) {
-    const memoryContext = formatMemoriesForInjection(memories, 'session_start', state.worktree);
-    await injectContext(state, sessionId, memoryContext);
-    log(ctx, 'info', `Injected ${memories.length} memories on session start`);
-  }
   
   log(ctx, 'info', `Session started: ${sessionId}`);
 }
@@ -509,9 +500,10 @@ async function handleSessionEnd(
  * Handle chat.message hook — fires exactly once per user turn, before the assistant responds.
  *
  * Two responsibilities:
- * 1. LAZY INJECTION — for continued sessions (-c flag) that skip session.created,
- *    inject memories on the first user message of the session. Awaited so that injection
- *    completes before the extraction branch runs (no concurrent writes).
+ * 1. LAZY INJECTION — single injection path for ALL sessions (new and continued).
+ *    On the first user message, inject relevant memories before the assistant starts
+ *    responding. handleSessionCreated no longer injects so that injection always
+ *    happens at exactly the right moment (just before the first real user turn).
  * 2. PER-MESSAGE EXTRACTION — if extractOnUserMessage is enabled, extract text from the
  *    user's message parts (no API call needed), run the importance pre-filter, and if it
  *    passes, fire the full extraction pipeline fire-and-forget so the assistant can start
@@ -631,28 +623,45 @@ async function handleUserMessage(
 /**
  * Pre-filter for per-user-message extraction.
  *
- * Two gates (both must pass):
+ * Two gates:
  *
  * 1. DISQUALIFICATION gate — skips extraction for pure task commands.
- *    If the message starts with an imperative verb and has zero positive
+ *    If the message starts with an imperative verb AND has no positive
  *    memory signals, it is a task request with nothing worth storing.
+ *    If the message DOES contain a memory signal it bypasses this gate
+ *    and is immediately passed to Gate 2 (or returned true if threshold=0).
  *
- * 2. POSITIVE SIGNAL gate — at least (threshold * 4) of the 7 positive
- *    pattern groups must match. Default threshold 0.5 → at least 2 matches.
+ * 2. POSITIVE SIGNAL gate — score = matchCount / 7.
+ *    Passes if score > threshold (strict greater-than so that a single match
+ *    (score ≈ 0.143) passes a threshold of 0.14 or below, and the default
+ *    threshold of 0.3 requires at least 3 of 7 groups to match).
+ *    Special case: threshold === 0 always returns true.
  */
-function preFilterImportance(text: string, threshold: number): boolean {
-  // Gate 1: Disqualify pure task commands.
-  // If the message leads with a task imperative AND has no positive memory
-  // signals, skip extraction — nothing worth storing in "go scrape xyz".
-  const taskCommandPattern = /^\s*(go|run|execute|fetch|scrape|build|deploy|generate|create|write|open|start|stop|delete|remove|list|show|get|check|test|install|update|upgrade|download|clone|init|make|do|find)\b/i;
-  const memorySignalPattern = /remember|don't forget|keep in mind|note that|important|never|always|must|cannot|decided|decision|prefer|learned|realized|discovered|fixed|bug|error|wrong|incorrect/i;
+export function preFilterImportance(text: string, threshold: number): boolean {
+  // Special case: threshold 0 means always pass.
+  if (threshold === 0) return true;
 
-  if (taskCommandPattern.test(text) && !memorySignalPattern.test(text)) {
-    debugLog(`preFilterImportance: task command disqualified — "${text.slice(0, 80)}"`);
-    return false;
+  const memorySignalPattern = /remember|don't forget|keep in mind|note that|important|never|always|must|cannot|decided|decision|prefer|learned|realized|discovered|fixed|bug|error|wrong|incorrect|!{2,}/i;
+  const emphasisPattern = /[A-Z]{4,}/; // case-sensitive: ALL_CAPS is an emphasis signal
+
+  // Gate 1: Disqualify pure task commands only when no memory signal is present.
+  // If a memory signal IS present in a task command, return true immediately —
+  // the memory signal is what matters regardless of the imperative framing.
+  const taskCommandPattern = /^\s*(go|run|execute|fetch|scrape|build|deploy|generate|create|write|open|start|stop|delete|remove|list|show|get|check|test|install|update|upgrade|download|clone|init|make|do|find)\b/i;
+  const hasMemorySignal = memorySignalPattern.test(text) || emphasisPattern.test(text);
+
+  if (taskCommandPattern.test(text)) {
+    if (!hasMemorySignal) {
+      debugLog(`preFilterImportance: task command disqualified — "${text.slice(0, 80)}"`);
+      return false;
+    }
+    // Task command but has a memory signal — return true immediately.
+    debugLog(`preFilterImportance: task command with memory signal — passing immediately`);
+    return true;
   }
 
   // Gate 2: Positive signal matching.
+  // Score is the fraction of the 7 pattern groups that match.
   const highImportancePatterns = [
     // Explicit memory requests
     /remember|don't forget|keep in mind|note that|important/i,
@@ -675,10 +684,10 @@ function preFilterImportance(text: string, threshold: number): boolean {
     if (pattern.test(text)) matchCount++;
   }
 
-  // Score as fraction of total pattern groups matched.
-  // threshold=0.15 (default) means at least 1 of 7 groups must match.
+  // Score is the fraction of the 7 pattern groups that match.
+  // Uses >= so that threshold=0.3 means matchCount/7 ≥ 0.3 → matchCount ≥ ceil(0.3*7)=3.
   const score = matchCount / highImportancePatterns.length;
-  debugLog(`preFilterImportance: matchCount=${matchCount}/${highImportancePatterns.length}, score=${score.toFixed(2)}, threshold=${threshold}`);
+  debugLog(`preFilterImportance: matchCount=${matchCount}/${highImportancePatterns.length}, score=${score.toFixed(3)}, threshold=${threshold}`);
 
   return score >= threshold;
 }

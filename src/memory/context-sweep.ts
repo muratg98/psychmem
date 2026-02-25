@@ -83,11 +83,52 @@ export class ContextSweep {
   }
 
   /**
-   * Extract candidates from conversation text (Stop event)
-   * This is a comprehensive analysis of the full conversation
-   * 
-   * v1.5: Now uses multilingual patterns + structural signals
+   * Content quality gate — rejects chunks that are primarily code, JSON, file paths,
+   * line-number-prefixed tool output, or truncated fragments.
+   *
+   * Returns true if the content is acceptable prose-quality text worth storing as memory.
    */
+  private isContentQualityAcceptable(text: string): boolean {
+    const trimmed = text.trim();
+    if (trimmed.length < 20) return false;
+
+    // Reject if ends with a truncation marker (raw tool output that leaked through)
+    if (/\.\.\.\[truncated\]$|\.\.\.$/.test(trimmed)) return false;
+
+    // Reject if the majority of lines start with line-number prefixes (Read tool output)
+    // Pattern: "123: " or "  123: " — characteristic of our own Read tool output
+    const lines = trimmed.split('\n');
+    const lineNumberedLines = lines.filter(l => /^\s*\d{1,5}:\s/.test(l));
+    if (lines.length >= 3 && lineNumberedLines.length / lines.length > 0.5) return false;
+
+    // Count characters in code fence blocks
+    const codeFenceContent = trimmed.match(/```[\s\S]*?```/g)?.join('') ?? '';
+    const inlineCodeContent = trimmed.match(/`[^`\n]+`/g)?.join('') ?? '';
+    const codeChars = codeFenceContent.length + inlineCodeContent.length;
+    const codeRatio = codeChars / Math.max(1, trimmed.length);
+
+    // Reject if >60% of content is inside code fences/inline code
+    if (codeRatio > 0.6) return false;
+
+    // Count structural/special characters outside code blocks
+    const textWithoutCode = trimmed
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`\n]+`/g, '');
+    const specialChars = (textWithoutCode.match(/[{}[\]()=><;|&\\]/g) ?? []).length;
+    const alphanumChars = (textWithoutCode.match(/[a-zA-Z0-9]/g) ?? []).length;
+    const specialRatio = specialChars / Math.max(1, alphanumChars);
+
+    // Reject if special character density exceeds 30% of alphanumeric chars
+    if (specialRatio > 0.3) return false;
+
+    // Reject if it's primarily a file path list (no sentence structure)
+    const pathOnlyLines = lines.filter(l => /^\s*(?:[A-Za-z]:\\|\/[\w.-]|\.\/)[\w./-]+/.test(l.trim()));
+    if (lines.length >= 2 && pathOnlyLines.length / lines.length > 0.7) return false;
+
+    return true;
+  }
+
+
   private extractFromConversationText(event: Event): MemoryCandidate[] {
     const content = event.content;
     const candidates: MemoryCandidate[] = [];
@@ -154,6 +195,9 @@ export class ContextSweep {
       // Filter out low-weight signals
       const significantSignals = signals.filter(s => s.weight >= this.config.signalThreshold);
       if (significantSignals.length === 0) continue;
+
+      // Content quality gate — reject code-heavy, path-only, truncated chunks
+      if (!this.isContentQualityAcceptable(chunk)) continue;
       
       const classification = this.classifyContentMultilingual(chunk, significantSignals);
       const summary = this.generateSummary(chunk, classification, significantSignals);
@@ -301,6 +345,9 @@ export class ContextSweep {
     // Filter out low-weight signals
     const significantSignals = signals.filter(s => s.weight >= this.config.signalThreshold);
     if (significantSignals.length === 0) return null;
+
+    // Content quality gate — reject code-heavy, path-only, truncated content
+    if (!this.isContentQualityAcceptable(content)) return null;
     
     const classification = this.classifyContentMultilingual(content, significantSignals);
     const summary = this.generateSummary(content, classification, significantSignals);

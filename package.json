@@ -39,10 +39,6 @@
     "./adapters/opencode": {
       "types": "./dist/adapters/opencode/index.d.ts",
       "import": "./dist/adapters/opencode/index.js"
-    },
-    "./adapters/claude-code": {
-      "types": "./dist/adapters/claude-code/index.d.ts",
-      "import": "./dist/adapters/claude-code/index.js"
     }
   },
   "scripts": {
@@ -57,17 +53,13 @@
     "psychology",
     "cognitive-architecture",
     "agent-memory",
-    "claude-code",
     "opencode"
   ],
   "author": "muratg98",
   "license": "MIT",
   "files": [
-    ".claude-plugin",
     "dist",
-    "hooks",
     "plugin.js",
-    "plugin.json",
     "README.md"
   ],
   "dependencies": {

@@ -10,9 +10,9 @@ import type { AgentType } from '../types/index.js';
 /**
  * Resolve database path, expanding ~ and {agentType} template
  * @param dbPath - Path template (e.g., '~/.psychmem/{agentType}/memory.db')
- * @param agentType - Agent type to substitute (e.g., 'opencode', 'claude-code')
+ * @param agentType - Agent type to substitute (e.g., 'opencode')
  */
-export function resolveDbPath(dbPath: string, agentType: AgentType = 'claude-code'): string {
+export function resolveDbPath(dbPath: string, agentType: AgentType = 'opencode'): string {
   let resolved = dbPath;
   
   // Replace {agentType} template with actual agent type
@@ -35,7 +35,7 @@ export function resolveDbPath(dbPath: string, agentType: AgentType = 'claude-cod
 /**
  * Get the default data directory for a specific agent type
  */
-export function getDataDir(agentType: AgentType = 'claude-code'): string {
+export function getDataDir(agentType: AgentType = 'opencode'): string {
   const dataDir = join(homedir(), '.psychmem', agentType);
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });
@@ -46,6 +46,6 @@ export function getDataDir(agentType: AgentType = 'claude-code'): string {
 /**
  * Get the default database path for a specific agent type
  */
-export function getDefaultDbPath(agentType: AgentType = 'claude-code'): string {
+export function getDefaultDbPath(agentType: AgentType = 'opencode'): string {
   return join(getDataDir(agentType), 'memory.db');
 }

@@ -77,8 +77,6 @@ export class MemoryDatabase {
         ended_at TEXT,
         status TEXT NOT NULL DEFAULT 'active',
         metadata TEXT,
-        transcript_path TEXT,
-        transcript_watermark INTEGER DEFAULT 0,
         message_watermark INTEGER DEFAULT 0
       );
 
@@ -181,15 +179,19 @@ export class MemoryDatabase {
     `);
 
     // Schema version check — fail loudly on mismatch (prevents silent corruption)
-    const SCHEMA_VERSION = 2;
+    const SCHEMA_VERSION = 3;
     const row = this.db.prepare('SELECT version FROM schema_version ORDER BY rowid DESC LIMIT 1').get() as { version: number } | undefined;
     if (!row) {
       // Fresh DB — stamp with current version
       this.db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(SCHEMA_VERSION, new Date().toISOString());
-    } else if (row.version !== SCHEMA_VERSION) {
+    } else if (row.version < SCHEMA_VERSION) {
+      // Run incremental migrations then update stamp
+      this.runMigrations(row.version, SCHEMA_VERSION);
+      this.db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(SCHEMA_VERSION, new Date().toISOString());
+    } else if (row.version > SCHEMA_VERSION) {
       throw new Error(
         `psychmem DB schema mismatch: expected version ${SCHEMA_VERSION}, found ${row.version}. ` +
-        'Delete the database file or run migrations to continue.'
+        'This DB was created by a newer version of psychmem.'
       );
     }
 
@@ -201,6 +203,24 @@ export class MemoryDatabase {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_memory_project_scope ON memory_units(project_scope);
     `);
+  }
+
+  /**
+   * Run incremental schema migrations from `fromVersion` up to (but not including) `toVersion`.
+   */
+  private runMigrations(fromVersion: number, toVersion: number): void {
+    // v2 → v3: Drop legacy transcript columns from sessions table.
+    // SQLite supports DROP COLUMN since 3.35.0 (2021); Bun bundles a modern SQLite.
+    if (fromVersion < 3 && toVersion >= 3) {
+      const sessionCols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as any[];
+      const colNames = sessionCols.map((c: any) => c.name as string);
+      if (colNames.includes('transcript_path')) {
+        this.db.exec(`ALTER TABLE sessions DROP COLUMN transcript_path`);
+      }
+      if (colNames.includes('transcript_watermark')) {
+        this.db.exec(`ALTER TABLE sessions DROP COLUMN transcript_watermark`);
+      }
+    }
   }
 
   /**
@@ -220,7 +240,7 @@ export class MemoryDatabase {
   // Session Operations
   // ===========================================================================
 
-  createSession(project: string, metadata?: Record<string, unknown>, transcriptPath?: string): Session {
+  createSession(project: string, metadata?: Record<string, unknown>): Session {
     this.ensureInit();
     
     const session: Session = {
@@ -229,22 +249,18 @@ export class MemoryDatabase {
       startedAt: new Date(),
       status: 'active',
       metadata,
-      transcriptPath,
-      transcriptWatermark: 0,
       messageWatermark: 0,
     };
 
     this.db.prepare(`
-      INSERT INTO sessions (id, project, started_at, status, metadata, transcript_path, transcript_watermark, message_watermark)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO sessions (id, project, started_at, status, metadata, message_watermark)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       session.id,
       session.project,
       session.startedAt.toISOString(),
       session.status,
       metadata ? JSON.stringify(metadata) : null,
-      transcriptPath ?? null,
-      0,
       0
     );
 
@@ -269,27 +285,6 @@ export class MemoryDatabase {
     this.ensureInit();
     const rows = this.db.prepare(`SELECT * FROM sessions WHERE status = 'active'`).all() as any[];
     return rows.map(row => this.rowToSession(row));
-  }
-
-  /**
-   * Get the current transcript watermark (byte offset) for a session
-   */
-  getSessionWatermark(sessionId: string): number {
-    this.ensureInit();
-    const row = this.db.prepare(`
-      SELECT transcript_watermark FROM sessions WHERE id = ?
-    `).get(sessionId) as any;
-    return row?.transcript_watermark ?? 0;
-  }
-
-  /**
-   * Update the transcript watermark (byte offset) for a session
-   */
-  updateSessionWatermark(sessionId: string, watermark: number): void {
-    this.ensureInit();
-    this.db.prepare(`
-      UPDATE sessions SET transcript_watermark = ? WHERE id = ?
-    `).run(watermark, sessionId);
   }
 
   /**
@@ -868,8 +863,6 @@ export class MemoryDatabase {
       endedAt: row.ended_at ? new Date(row.ended_at) : undefined,
       status: row.status,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      transcriptPath: row.transcript_path ?? undefined,
-      transcriptWatermark: row.transcript_watermark ?? 0,
       messageWatermark: row.message_watermark ?? 0,
     };
   }

@@ -196,25 +196,15 @@
 | `processAndStore()` assigns correct project scope | Scope assignment |
 | Scoring produces higher scores for more important candidates | Importance ordering |
 
-### 9. `src/transcript/parser.test.ts` — JSONL transcript parsing
+### 9. `src/hooks/stop.test.ts` — Stop hook
 
 | Test | What it verifies |
 |------|-----------------|
-| Parses valid JSONL with assistant/human messages | Happy path |
-| Incremental parsing with watermark (start from byte offset) | Watermark support |
-| Handles CRLF line endings (Windows) | Cross-platform |
-| Handles empty/malformed lines gracefully | Error resilience |
-| Extracts tool use events from transcript | Tool extraction |
+| Extracts memories from `conversationText` | Text extraction path |
+| Returns `memoriesCreated` count | Output contract |
+| Handles missing session gracefully | Error path |
 
-### 10. `src/transcript/sweep.test.ts` — TranscriptSweep pipeline
-
-| Test | What it verifies |
-|------|-----------------|
-| `sweep()` extracts candidates from parsed transcript | Pipeline integration |
-| Deduplication removes near-duplicate candidates | Dedup pipeline |
-| Limit cap respects `maxMemoriesPerStop` | Limit enforcement |
-
-### 11. `src/retrieval/index.test.ts` — MemoryRetrieval
+### 10. `src/retrieval/index.test.ts` — MemoryRetrieval
 
 | Test | What it verifies |
 |------|-----------------|
@@ -225,7 +215,7 @@
 | Scope-based retrieval returns correct subset | Scope filtering |
 | `search()` respects `includeDecayed` filter | Status filter |
 
-### 12. `src/hooks/index.test.ts` — PsychMemHooks dispatcher
+### 11. `src/hooks/index.test.ts` — PsychMemHooks dispatcher
 
 | Test | What it verifies |
 |------|-----------------|
@@ -233,7 +223,7 @@
 | `handleHook()` for all 5 hook types returns `HookOutput` | Contract |
 | Unknown hookType returns error | Error handling |
 
-### 13. `src/hooks/session-start.test.ts` — SessionStart hook
+### 12. `src/hooks/session-start.test.ts` — SessionStart hook
 
 | Test | What it verifies |
 |------|-----------------|
@@ -242,16 +232,15 @@
 | Injects user-level memories regardless of project | Scope behavior |
 | Only injects matching project memories | Project filtering |
 
-### 14. `src/hooks/stop.test.ts` — Stop hook
+### 13. `src/hooks/stop.test.ts` — Stop hook
 
 | Test | What it verifies |
 |------|-----------------|
 | Extracts memories from `conversationText` | Text extraction path |
-| Extracts memories from transcript file | Transcript path |
 | Returns `memoriesCreated` count | Output contract |
 | Handles missing session gracefully | Error path |
 
-### 15. `src/hooks/session-end.test.ts` — SessionEnd hook
+### 14. `src/hooks/session-end.test.ts` — SessionEnd hook
 
 | Test | What it verifies |
 |------|-----------------|
@@ -259,24 +248,21 @@
 | Ends session with 'completed' status | Status update |
 | Transaction atomicity (decay + consolidation together) | Transaction safety |
 
-### 16. `src/hooks/post-tool-use.test.ts` — PostToolUse hook
+### 15. `src/hooks/post-tool-use.test.ts` — PostToolUse hook
 
 | Test | What it verifies |
 |------|-----------------|
 | Captures tool use event | Event creation |
 | Stores toolName, toolInput, toolOutput | Field persistence |
 
-### 17. `src/cli.test.ts` — CLI & hook output format
+### 16. `src/cli.test.ts` — CLI & hook output format
 
 | Test | What it verifies |
 |------|-----------------|
-| `transformClaudeCodeInput()` transforms raw Claude Code JSON to HookInput | Input transformation |
-| `handleHook()` SessionStart outputs `{ hookSpecificOutput: { hookEventName, additionalContext } }` | Output format |
-| `handleHook()` Stop/SessionEnd outputs `{ continue: true }` | Non-blocking output |
+| `handleHook()` with valid JSON processes correctly | Input handling |
 | `handleHook()` with invalid JSON writes error to stderr, exits 0 | Error handling |
-| `--agent claude-code` flag sets agent type correctly | Agent flag parsing |
 
-### 18. `src/core.test.ts` — PsychMem facade
+### 17. `src/core.test.ts` — PsychMem facade
 
 | Test | What it verifies |
 |------|-----------------|
@@ -287,14 +273,7 @@
 | `pinMemory()` / `forgetMemory()` work through facade | Feedback pass-through |
 | `applyDecay()` / `runConsolidation()` accessible via facade | Maintenance methods |
 
-### 19. `src/adapters/claude-code/index.test.ts` — ClaudeCodeAdapter
-
-| Test | What it verifies |
-|------|-----------------|
-| `writeToAutoMemory()` writes a markdown file | File output |
-| Auto-memory file content matches expected format | Format validation |
-
-### 20. `src/index.test.ts` — Plugin entry point
+### 18. `src/index.test.ts` — Plugin entry point
 
 | Test | What it verifies |
 |------|-----------------|
@@ -310,14 +289,14 @@
 | **P0 — Core** | `database.test.ts`, `core.test.ts` | Everything depends on storage + facade |
 | **P1 — Memory** | `patterns.test.ts`, `structural-analyzer.test.ts`, `context-sweep.test.ts`, `selective-memory.test.ts` | The extraction pipeline is the brain |
 | **P2 — Hooks** | `hooks/index.test.ts`, `session-start.test.ts`, `stop.test.ts`, `session-end.test.ts`, `post-tool-use.test.ts` | Integration points |
-| **P3 — Retrieval** | `retrieval/index.test.ts`, `transcript/*.test.ts` | Search & parsing |
-| **P4 — Edge** | `types/index.test.ts`, `utils/paths.test.ts`, `sqlite-adapter.test.ts`, `cli.test.ts`, `index.test.ts`, `claude-code/index.test.ts` | Support & safety |
+| **P3 — Retrieval** | `retrieval/index.test.ts` | Search |
+| **P4 — Edge** | `types/index.test.ts`, `utils/paths.test.ts`, `sqlite-adapter.test.ts`, `cli.test.ts`, `index.test.ts` | Support & safety |
 
 ---
 
 ## Estimated Scope
 
-- **20 test files**, ~130 individual test cases
+- **18 test files**, ~110 individual test cases
 - All using `node:test` + `node:assert`
 - Each file self-contained with temp database setup/teardown
 - Total estimated effort: ~1,500-2,000 lines of test code

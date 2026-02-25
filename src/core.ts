@@ -226,4 +226,3 @@ export type {
 
 // Re-export adapters
 export { createOpenCodePlugin, OpenCodeAdapter } from './adapters/opencode/index.js';
-export { ClaudeCodeAdapter, createClaudeCodeAdapter } from './adapters/claude-code/index.js';

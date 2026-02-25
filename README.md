@@ -2,7 +2,9 @@
 
 Psychology-grounded selective memory for AI coding agents.
 
-PsychMem gives AI agents ([OpenCode](https://opencode.ai), [Claude Code](https://docs.anthropic.com/en/docs/claude-code)) persistent memory that works like human memory. Important information consolidates into long-term storage while trivial details naturally decay away, using real cognitive science models.
+PsychMem gives [OpenCode](https://opencode.ai) persistent, psychology-based memory that survives across sessions, context compaction, and restarts. It hooks into OpenCode's plugin system to automatically extract what matters from your conversations, store it with decay-aware scoring, and inject relevant context back at the start of every session — without you having to manage any of it manually.
+
+Unlike simple note-taking or full-transcript approaches, PsychMem is selective by design: it scores each candidate memory across seven cognitive features, lets irrelevant details fade via Ebbinghaus decay curves, and caps extraction at Miller's Law limit (7 items per turn). The result is a memory store that grows smarter over time rather than just larger.
 
 ## Experimental
 
@@ -18,19 +20,19 @@ If you run into issues, please [open an issue](https://github.com/muratg98/psych
 - **STM/LTM consolidation** — Dual-store model with automatic promotion based on strength, frequency, and classification
 - **Scope-aware injection** — User-level memories (preferences, constraints) always injected; project-level memories (decisions, bugfixes) only injected for the matching project
 - **Multilingual** — Importance detection patterns in 15 languages
-- **Dual-platform** — Single package, native support for both OpenCode and Claude Code
 
 ## Requirements
 
-- [Node.js](https://nodejs.org/) 22+ (for `node:sqlite`)
-- [OpenCode](https://opencode.ai/) v1.0.115+ (for OpenCode plugin)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (for Claude Code plugin)
+- [OpenCode](https://opencode.ai/) (latest)
+- Node.js 22+ **or** Bun (for `node:sqlite` / `bun:sqlite`)
 
 ## Installation
 
-### OpenCode
+### OpenCode (recommended)
 
-Add to your OpenCode config (`~/.config/opencode/opencode.json` or `opencode.json` in your project root):
+OpenCode manages plugin installation automatically. Add `psychmem` to your config and OpenCode will fetch and cache it from npm via Bun on the next startup — no manual install required.
+
+**Global** (`~/.config/opencode/opencode.json`) — memory works across all your projects:
 
 ```json
 {
@@ -38,57 +40,33 @@ Add to your OpenCode config (`~/.config/opencode/opencode.json` or `opencode.jso
 }
 ```
 
-Restart OpenCode — it will automatically install the package from npm via Bun at startup. No manual `npm install` needed.
-
-To pin to a specific version:
+**Per-project** (`opencode.json` in your project root) — memory scoped to this project only:
 
 ```json
 {
-  "plugin": ["psychmem@1.0.9"]
+  "plugin": ["psychmem"]
 }
 ```
 
-### Claude Code
+OpenCode caches packages in `~/.cache/opencode/node_modules/`. To pin to a specific version:
 
-Clone to Claude Code's plugin directory and build:
+```json
+{
+  "plugin": ["psychmem@1.0.10"]
+}
+```
+
+### npm / Bun (manual)
+
+If you want to install psychmem outside of OpenCode's plugin system (e.g. to use the CLI or import the library):
 
 ```bash
-# Linux/macOS
-git clone https://github.com/muratg98/psychmem.git ~/.claude/plugins/psychmem
-cd ~/.claude/plugins/psychmem
-npm install && npm run build
+# npm
+npm install psychmem
+
+# Bun
+bun add psychmem
 ```
-
-```powershell
-# Windows (PowerShell)
-git clone https://github.com/muratg98/psychmem.git "$env:USERPROFILE\.claude\plugins\psychmem"
-cd "$env:USERPROFILE\.claude\plugins\psychmem"
-npm install; npm run build
-```
-
-Then register in your Claude Code settings (`~/.claude/settings.json`):
-
-```json
-{
-  "plugins": [
-    {
-      "name": "psychmem",
-      "root": "~/.claude/plugins/psychmem",
-      "hooks": "hooks/hooks.json"
-    }
-  ]
-}
-```
-
-PsychMem hooks into 5 Claude Code lifecycle events:
-
-| Hook | What it does |
-|------|-------------|
-| `SessionStart` | Injects relevant memories into context |
-| `UserPromptSubmit` | Captures user prompts (async, non-blocking) |
-| `PostToolUse` | Tracks tool usage patterns (async, non-blocking) |
-| `Stop` | Extracts and stores memories from the conversation |
-| `SessionEnd` | Runs decay and consolidation |
 
 ### Local Development
 
@@ -98,11 +76,14 @@ cd psychmem
 npm install && npm run build
 ```
 
-For OpenCode, symlink to the plugin directory:
+To load a local build as an OpenCode plugin, place or symlink `plugin.js` into the plugin directory:
 
 ```bash
-# Linux/macOS
+# Linux/macOS — global
 ln -sf "$(pwd)/plugin.js" ~/.config/opencode/plugins/psychmem.js
+
+# Linux/macOS — project-level
+ln -sf "$(pwd)/plugin.js" .opencode/plugins/psychmem.js
 
 # Windows (PowerShell) — copy instead
 Copy-Item "plugin.js" "$env:USERPROFILE\.config\opencode\plugins\psychmem.js"
@@ -216,7 +197,6 @@ User-scoped memories are injected in every session. Project-scoped memories are 
 ### Environment Variables
 
 ```bash
-# OpenCode-specific
 PSYCHMEM_INJECT_ON_COMPACTION=true         # Inject memories during context compaction
 PSYCHMEM_EXTRACT_ON_COMPACTION=true        # Extract memories before compaction
 PSYCHMEM_EXTRACT_ON_MESSAGE=true           # Per-message extraction (real-time)
@@ -231,18 +211,6 @@ PSYCHMEM_MESSAGE_IMPORTANCE_THRESHOLD=0.5  # Min importance to trigger extractio
 ```
 ~/.psychmem/
   opencode/memory.db       # OpenCode memories (SQLite)
-  claude-code/memory.db    # Claude Code memories (SQLite)
-```
-
-Claude Code also writes human-readable memory files to:
-
-```
-~/.claude/projects/<project>/memory/
-  MEMORY.md                # Main memory file (auto-loaded by Claude Code)
-  constraints.md
-  learnings.md
-  decisions.md
-  bugfixes.md
 ```
 
 ## Architecture
@@ -251,7 +219,7 @@ Claude Code also writes human-readable memory files to:
 src/
   index.ts                    # Plugin entry (OpenCode — exports only plugin function)
   core.ts                     # Library API (all classes/factories re-exported)
-  cli.ts                      # CLI for Claude Code hooks + memory management
+  cli.ts                      # CLI for memory management
   types/index.ts              # Type definitions, config, constants
   storage/
     database.ts               # SQLite storage with decay, consolidation, scoping
@@ -269,13 +237,9 @@ src/
     post-tool-use.ts          # Track tool usage
   retrieval/
     index.ts                  # Scope-aware memory search (Jaccard similarity)
-  transcript/
-    parser.ts                 # JSONL transcript parsing (Claude Code)
-    sweep.ts                  # Transcript-based extraction pipeline
   adapters/
     types.ts                  # Adapter interfaces, OpenCode SDK types
     opencode/index.ts         # OpenCode plugin (event, tool, chat, compaction hooks)
-    claude-code/index.ts      # Claude Code adapter (auto-memory file writer)
   utils/
     paths.ts                  # DB path resolution, directory creation
 ```

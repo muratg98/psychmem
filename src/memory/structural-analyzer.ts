@@ -83,13 +83,13 @@ export function analyzeTypography(text: string): ImportanceSignal[] {
     });
   }
   
-  // Code blocks (context-dependent)
+  // Code blocks (context-dependent) — lowered weight, code is ubiquitous in programming
   const codeBlockMatches = text.match(/```[\s\S]*?```|`[^`]+`/g);
   if (codeBlockMatches && codeBlockMatches.length > 0) {
     signals.push({
       type: 'code_block',
       source: 'code',
-      weight: 0.4, // Lower weight - code is common, importance depends on context
+      weight: 0.25, // Lowered from 0.4 — code alone is not memory-worthy
     });
   }
   
@@ -259,12 +259,12 @@ export function analyzeDiscourseMarkers(text: string): ImportanceSignal[] {
     });
   }
   
-  // Colon-based definitions (term: definition)
+  // Colon-based definitions (term: definition) — slightly reduced
   if (/^[A-Z][^:]{2,30}:\s/m.test(text)) {
     signals.push({
       type: 'structural_enumeration',
       source: 'definition',
-      weight: 0.4,
+      weight: 0.3, // Lowered from 0.4
     });
   }
   
@@ -306,13 +306,13 @@ export function analyzeMetaSignals(chunk: ChunkContext, context: ConversationCon
     }
   }
   
-  // File paths (Unix and Windows)
+  // File paths (Unix and Windows) — lowered weight, file paths alone are not memory-worthy
   const filePathPattern = /(?:\/[\w.-]+)+\.\w+|[A-Z]:\\(?:[\w.-]+\\)*[\w.-]+\.\w+/g;
   if (filePathPattern.test(text)) {
     signals.push({
       type: 'meta_reference',
       source: 'file_path',
-      weight: 0.4,
+      weight: 0.25, // Lowered from 0.4
     });
   }
   
@@ -336,12 +336,12 @@ export function analyzeMetaSignals(chunk: ChunkContext, context: ConversationCon
     }
   }
   
-  // URL references (often important context)
+  // URL references — lowered weight, URLs alone are not memory-worthy
   if (/https?:\/\/[^\s]+/.test(text)) {
     signals.push({
       type: 'meta_reference',
       source: 'url',
-      weight: 0.3,
+      weight: 0.2, // Lowered from 0.3
     });
   }
   
