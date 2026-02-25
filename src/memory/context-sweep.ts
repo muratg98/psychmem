@@ -274,7 +274,10 @@ export class ContextSweep {
     }
 
     // 2. Conversation turns — split on Human:/Assistant: boundaries
-    //    Groups consecutive lines belonging to the same speaker
+    //    Each speaker's turn is kept as a separate chunk so detectChunkRole()
+    //    can reliably filter out assistant/tool turns.  Grouping Human+Assistant
+    //    exchanges together (the old behaviour) caused assistant reasoning to slip
+    //    through the role filter and get stored as constraints or procedural memories.
     if (hasTurnPattern) {
       const turns: string[] = [];
       let currentTurn = '';
@@ -291,17 +294,11 @@ export class ContextSweep {
         turns.push(currentTurn.trim());
       }
       
-      // Group Human+Assistant turns together as exchange pairs
-      const exchanges: string[] = [];
-      for (let i = 0; i < turns.length; i += 2) {
-        const exchange = turns.slice(i, i + 2).join('\n');
-        if (exchange.length > 20) {
-          exchanges.push(exchange);
-        }
-      }
-      
-      if (exchanges.length > 0) {
-        return exchanges;
+      // Return individual turns — NOT exchange pairs.
+      // extractFromConversationText will skip assistant/tool turns via detectChunkRole.
+      const filtered = turns.filter(t => t.length > 20);
+      if (filtered.length > 0) {
+        return filtered;
       }
     }
     
@@ -425,14 +422,32 @@ export class ContextSweep {
   }
 
   /**
-   * Detect repeated concepts/requests across events
+   * Detect repeated concepts/requests across events.
+   *
+   * Only fires on UserPromptSubmit events (user-authored content).
+   * Only stores a candidate when the concept matches a memory-worthy
+   * pattern (explicit memory request, constraint, preference, decision,
+   * or learning) — generic words like "tool" or "read" are excluded even
+   * if they appear many times.
+   *
+   * Concepts that are too short, purely numeric, or match a stop-word list
+   * are also excluded.  The summary deliberately avoids the phrase
+   * "Repeated concept: X (mentioned N times)" which is statistical noise
+   * rather than a real memory.
    */
   private detectRepetitions(events: Event[]): MemoryCandidate[] {
     const candidates: MemoryCandidate[] = [];
+
+    // Only examine user prompts — assistant/tool repetitions are noise
+    const userEvents = events.filter(e => e.hookType === 'UserPromptSubmit');
+    if (userEvents.length === 0) return candidates;
+
+    // Patterns that make a repeated concept memory-worthy
+    const MEMORY_WORTHY_CONCEPT = /^(remember|forget|always|never|must|cannot|prefer|avoid|decided|decision|learned|realized|discovered|constraint|requirement|important|critical|essential|crucial)$/i;
+
     const conceptCounts = new Map<string, { count: number; eventIds: string[]; content: string }>();
-    
-    // Extract key concepts from each event
-    for (const event of events) {
+
+    for (const event of userEvents) {
       const concepts = this.extractKeyConcepts(event.content);
       for (const concept of concepts) {
         const existing = conceptCounts.get(concept);
@@ -448,26 +463,27 @@ export class ContextSweep {
         }
       }
     }
-    
-    // Create candidates for repeated concepts (3+ mentions)
+
+    // Create candidates only for clearly memory-worthy repeated concepts (3+)
     for (const [concept, data] of conceptCounts.entries()) {
-      if (data.count >= 3) {
-        candidates.push({
-          summary: `Repeated concept: ${concept} (mentioned ${data.count} times)`,
-          classification: 'semantic',
-          sourceEventIds: data.eventIds,
-          importanceSignals: [{
-            type: 'repeated_request',
-            source: concept,
-            weight: Math.min(0.9, 0.5 + data.count * 0.1),
-          }],
-          preliminaryImportance: Math.min(0.9, 0.5 + data.count * 0.1),
-          extractionMethod: 'repetition_detection',
-          confidence: 0.5,
-        });
-      }
+      if (data.count < 3) continue;
+      if (!MEMORY_WORTHY_CONCEPT.test(concept)) continue;
+
+      candidates.push({
+        summary: `💡 User repeatedly emphasises "${concept}" across ${data.count} messages`,
+        classification: 'semantic',
+        sourceEventIds: data.eventIds,
+        importanceSignals: [{
+          type: 'repeated_request',
+          source: concept,
+          weight: Math.min(0.9, 0.5 + data.count * 0.1),
+        }],
+        preliminaryImportance: Math.min(0.9, 0.5 + data.count * 0.1),
+        extractionMethod: 'repetition_detection',
+        confidence: 0.5,
+      });
     }
-    
+
     return candidates;
   }
 
@@ -559,11 +575,15 @@ export class ContextSweep {
   }
   
   /**
-   * Format summary with classification prefix
+   * Format summary with classification prefix.
+   * Strips role prefixes (Human:/Assistant:) that may appear when the chunk
+   * was split from a conversation transcript.
    */
   private formatSummary(text: string, classification: MemoryClassification): string {
     const emoji = this.getClassificationEmoji(classification);
-    return `${emoji} ${text.trim()}`.slice(0, 300);
+    // Remove leading role prefix if present
+    const cleaned = text.trim().replace(/^(Human|Assistant|Tool Result|Tool Error):\s*/i, '');
+    return `${emoji} ${cleaned}`.slice(0, 300);
   }
 
   /**
