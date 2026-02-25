@@ -164,6 +164,10 @@ export interface MemoryUnit {
   tags: string[];
   associations: string[]; // Related memory IDs
   
+  // Vector embedding (optional — populated asynchronously after memory creation)
+  // Stored as a Float32Array; serialised to BLOB in SQLite.
+  embedding?: Float32Array | undefined;
+  
   // Status
   status: MemoryStatus;
   version: number;

@@ -36,6 +36,7 @@ import { DEFAULT_CONFIG, getScopeForClassification } from '../../types/index.js'
 import { PsychMem, createPsychMem } from '../../core.js';
 import { MemoryDatabase, createMemoryDatabase } from '../../storage/database.js';
 import { MemoryRetrieval } from '../../retrieval/index.js';
+import { filterConflicts } from '../../retrieval/conflict-filter.js';
 
 // =============================================================================
 // Debug logging — writes to ~/.psychmem/plugin-debug.log (max 10 MB, rotated once)
@@ -550,19 +551,36 @@ async function handleUserMessage(
     state.currentSessionId = sessionId;
   }
 
-  // --- LAZY INJECTION ---
-  // For continued sessions (-c) that never fire session.created, inject memories
-  // on the first chat.message of the session. Awaited before extraction to avoid
-  // concurrent DB writes.
+  // Extract user message text early — needed both for injection query and
+  // for per-message extraction below.
+  const userText = output.parts
+    .filter(p => p.type === 'text' && p.text)
+    .map(p => p.text!)
+    .join('\n')
+    .trim();
+
+  debugLog(`handleUserMessage: user message text (${userText.length} chars): ${userText.slice(0, 120)}`);
+
+  // --- QUERY-AWARE LAZY INJECTION ---
+  // Inject memories on the first user message of a session.  The user's message
+  // text is used as a retrieval query so memories are ranked by relevance to the
+  // task at hand rather than by raw strength.  We wait until we have a real user
+  // message because only then do we know what context to retrieve against.
   if (!state.injectedSessions.has(sessionId)) {
     state.injectedSessions.add(sessionId);
     debugLog(`Lazy injection: first user message in session ${sessionId}`);
-    const memories = await getRelevantMemories(state, state.config.opencode.maxSessionStartMemories);
+    const queryText = userText || undefined;
+    const candidates = await getRelevantMemories(state, state.config.opencode.maxSessionStartMemories, queryText);
+    const budgeted = applyInjectionBudget(candidates);
+    const { clean: memories, suppressed } = filterConflicts(budgeted);
+    if (suppressed.length > 0) {
+      debugLog(`Conflict filter suppressed ${suppressed.length} memories: ${suppressed.map(s => s.memory.summary.slice(0, 40)).join('; ')}`);
+    }
     if (memories.length > 0) {
       const memoryContext = formatMemoriesForInjection(memories, 'session_start', state.worktree);
       await injectContext(state, sessionId, memoryContext);
-      log(ctx, 'info', `Lazy injection: ${memories.length} memories on continued session`);
-      debugLog(`Lazy injection: injected ${memories.length} memories`);
+      log(ctx, 'info', `Lazy injection: ${memories.length} memories (query-aware, STM-first, conflict-filtered) on first user message`);
+      debugLog(`Lazy injection: injected ${memories.length} memories (${memories.filter(m=>m.store==='stm').length} STM, ${memories.filter(m=>m.store==='ltm').length} LTM) with query="${(queryText ?? '').slice(0, 60)}"`);
     }
   }
 
@@ -572,19 +590,10 @@ async function handleUserMessage(
     return;
   }
 
-  // Extract text from the user message parts directly — no API call needed for the filter.
-  const userText = output.parts
-    .filter(p => p.type === 'text' && p.text)
-    .map(p => p.text!)
-    .join('\n')
-    .trim();
-
   if (!userText) {
     debugLog('handleUserMessage: no text content in user message parts, skipping extraction');
     return;
   }
-
-  debugLog(`handleUserMessage: user message text (${userText.length} chars): ${userText.slice(0, 120)}`);
 
   // Importance pre-filter using just the user message text (fast, no API call).
   const hasImportantContent = preFilterImportance(userText, state.config.opencode.messageImportanceThreshold);
@@ -814,16 +823,27 @@ function extractConversationText(messages: OpenCodeMessageContainer[]): string {
 }
 
 /**
- * Get relevant memories for current context with scope-based filtering (v1.6)
+ * Get relevant memories for current context with scope-based filtering.
+ *
+ * When a query string is provided (the first user message text), memories are
+ * re-ranked by relevance to that query using Jaccard/keyword similarity before
+ * the limit is applied.  Without a query, falls back to strength-DESC ordering.
+ *
  * Returns:
  * - All user-level memories (constraint, preference, learning, procedural)
  * - Project-level memories only for the current project
  */
 async function getRelevantMemories(
   state: OpenCodeAdapterState,
-  limit: number
+  limit: number,
+  query?: string
 ): Promise<MemoryUnit[]> {
-  // Use scope-based retrieval with current project context
+  if (query && query.trim()) {
+    return state.retrieval.retrieveByScopeWithQuery(query, {
+      currentProject: state.worktree,
+      limit,
+    });
+  }
   return state.retrieval.retrieveByScope({
     currentProject: state.worktree,
     limit,
@@ -831,8 +851,29 @@ async function getRelevantMemories(
 }
 
 /**
- * Format memories for context injection with scope grouping (v1.6)
+ * Apply the STM-first injection budget.
+ *
+ * Phases 2 of the retrieval flow:
+ *   1. STM memories go first (recency bias — mirrors human short-term recall).
+ *      Capped at STM_CAP (default 3).
+ *   2. Remaining budget filled with LTM memories.
+ *   3. Total never exceeds TOTAL_CAP (default 7).
+ *
+ * The input list is already relevance-ranked by getRelevantMemories; this
+ * function preserves that ranking within each tier.
  */
+function applyInjectionBudget(
+  memories: MemoryUnit[],
+  stmCap: number = 3,
+  totalCap: number = 7
+): MemoryUnit[] {
+  const stm = memories.filter(m => m.store === 'stm').slice(0, stmCap);
+  const ltmBudget = totalCap - stm.length;
+  const ltm = memories.filter(m => m.store === 'ltm').slice(0, ltmBudget);
+  return [...stm, ...ltm];
+}
+
+
 function formatMemoriesForInjection(
   memories: MemoryUnit[],
   context: 'session_start' | 'compaction',

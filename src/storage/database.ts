@@ -121,6 +121,7 @@ export class MemoryDatabase {
         
         tags TEXT,
         associations TEXT,
+        embedding BLOB,
         
         status TEXT NOT NULL DEFAULT 'active',
         version INTEGER NOT NULL DEFAULT 1,
@@ -179,7 +180,7 @@ export class MemoryDatabase {
     `);
 
     // Schema version check — fail loudly on mismatch (prevents silent corruption)
-    const SCHEMA_VERSION = 3;
+    const SCHEMA_VERSION = 4;
     const row = this.db.prepare('SELECT version FROM schema_version ORDER BY rowid DESC LIMIT 1').get() as { version: number } | undefined;
     if (!row) {
       // Fresh DB — stamp with current version
@@ -198,6 +199,8 @@ export class MemoryDatabase {
     // Migration: Add project_scope column if it doesn't exist (for existing DBs pre-v1.6)
     // MUST run before creating index on project_scope
     this.migrateProjectScope();
+    // Migration: Add embedding column if it doesn't exist (for existing DBs pre-v4)
+    this.migrateEmbedding();
     
     // Now safe to create index on project_scope (column guaranteed to exist)
     this.db.exec(`
@@ -221,6 +224,11 @@ export class MemoryDatabase {
         this.db.exec(`ALTER TABLE sessions DROP COLUMN transcript_watermark`);
       }
     }
+
+    // v3 → v4: Add embedding BLOB column for vector similarity retrieval.
+    if (fromVersion < 4 && toVersion >= 4) {
+      this.migrateEmbedding();
+    }
   }
 
   /**
@@ -233,6 +241,18 @@ export class MemoryDatabase {
     
     if (!hasProjectScope) {
       this.db.exec(`ALTER TABLE memory_units ADD COLUMN project_scope TEXT`);
+    }
+  }
+
+  /**
+   * Migration v4: Add embedding BLOB column for vector similarity retrieval.
+   * NULL for existing memories — they will be embedded lazily on next access.
+   */
+  private migrateEmbedding(): void {
+    const tableInfo = this.db.prepare(`PRAGMA table_info(memory_units)`).all() as any[];
+    const hasEmbedding = tableInfo.some((col: any) => col.name === 'embedding');
+    if (!hasEmbedding) {
+      this.db.exec(`ALTER TABLE memory_units ADD COLUMN embedding BLOB`);
     }
   }
 
@@ -904,10 +924,22 @@ export class MemoryDatabase {
       decayRate: row.decay_rate,
       tags: row.tags ? JSON.parse(row.tags) : [],
       associations: row.associations ? JSON.parse(row.associations) : [],
+      embedding: row.embedding ? new Float32Array((row.embedding as Buffer).buffer, (row.embedding as Buffer).byteOffset, (row.embedding as Buffer).byteLength / 4) : undefined,
       status: row.status as MemoryStatus,
       version: row.version,
       evidence: [], // Loaded separately if needed
     };
+  }
+
+  /**
+   * Persist a vector embedding for an existing memory.
+   * @param id - Memory ID
+   * @param embedding - Float32Array of length 384 (from EmbeddingService)
+   */
+  setMemoryEmbedding(id: string, embedding: Float32Array): void {
+    this.ensureInit();
+    const buf = Buffer.from(embedding.buffer);
+    this.db.prepare(`UPDATE memory_units SET embedding = ? WHERE id = ?`).run(buf, id);
   }
 
   /**

@@ -21,6 +21,7 @@ import type {
 } from '../types/index.js';
 import { DEFAULT_CONFIG, isUserLevelClassification } from '../types/index.js';
 import { MemoryDatabase } from '../storage/database.js';
+import { EmbeddingService } from '../embeddings/index.js';
 
 export class SelectiveMemory {
   private db: MemoryDatabase;
@@ -101,6 +102,13 @@ export class SelectiveMemory {
       }
 
       createdMemories.push(memory);
+    }
+
+    // Fire-and-forget: generate embeddings for newly created memories.
+    // Runs async so it doesn't block the synchronous extraction pipeline.
+    // Any failure is silently swallowed — retrieval falls back to Jaccard.
+    if (createdMemories.length > 0) {
+      void embedMemoriesAsync(createdMemories, this.db);
     }
 
     return createdMemories;
@@ -303,4 +311,30 @@ export interface ConsolidationResult {
 export interface DecayResult {
   memoriesDecayed: number;
   timestamp: Date;
+}
+
+// ===========================================================================
+// Embedding helpers
+// ===========================================================================
+
+/**
+ * Generate and persist embeddings for a list of newly created memories.
+ *
+ * This is intentionally async / fire-and-forget: the synchronous extraction
+ * pipeline doesn't wait for embeddings to be ready.  Retrieval falls back to
+ * Jaccard similarity for memories that don't yet have an embedding.
+ */
+async function embedMemoriesAsync(
+  memories: MemoryUnit[],
+  db: MemoryDatabase
+): Promise<void> {
+  try {
+    const texts = memories.map(m => m.summary);
+    const embeddings = await EmbeddingService.embedBatch(texts);
+    for (let i = 0; i < memories.length; i++) {
+      db.setMemoryEmbedding(memories[i]!.id, embeddings[i]!);
+    }
+  } catch {
+    // Silently ignore — retrieval has a Jaccard fallback.
+  }
 }

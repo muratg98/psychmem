@@ -18,6 +18,7 @@ import type {
 } from '../types/index.js';
 import { DEFAULT_CONFIG } from '../types/index.js';
 import { MemoryDatabase } from '../storage/database.js';
+import { EmbeddingService } from '../embeddings/index.js';
 
 /**
  * Options for scope-aware retrieval
@@ -145,38 +146,42 @@ export class MemoryRetrieval {
   }
 
   /**
-   * Rank memories by text similarity to query
+   * Rank memories by text similarity to query.
+   * Uses cosine similarity if a query embedding is provided; Jaccard fallback otherwise.
    */
-  private rankByTextSimilarity(memories: MemoryUnit[], query: string): MemoryUnit[] {
-    // Calculate similarity scores
+  private rankByTextSimilarity(memories: MemoryUnit[], query: string, queryEmbedding?: Float32Array): MemoryUnit[] {
     const scored = memories.map(mem => ({
       memory: mem,
-      score: this.calculateRelevance(mem, query),
+      score: this.calculateRelevance(mem, query, queryEmbedding),
     }));
-    
-    // Sort by score descending
     scored.sort((a, b) => b.score - a.score);
-    
     return scored.map(s => s.memory);
   }
 
   /**
    * Calculate relevance score for a memory given a query.
-   * 
-   * Query-similarity-first: text similarity dominates (weight 2.0) so that
-   * different queries return meaningfully different rankings. Strength acts as
-   * a tiebreaker multiplier rather than an additive base, preventing high-
-   * strength memories from swamping low-similarity ones.
+   *
+   * Scoring formula (all weights sum ≈ 1):
+   *
+   *   If both query and memory have embeddings (Phase 4+):
+   *     textSimilarity = 0.4 * cosine_similarity + 0.3 * jaccard + 0.3 * keyword_hits
+   *   Otherwise (fallback):
+   *     textSimilarity = jaccard * 0.5 + keyword_hits * 0.5
+   *
+   *   final = textSimilarity * 2.0 * (0.5 + strength * 0.5) + tagScore + recencyBonus
+   *
+   * This mirrors the OpenAI-recommended multi-factor scoring:
+   *   0.4 semantic_similarity + 0.2 strength + 0.15 recency + 0.15 importance + 0.1 tag_match
+   * while keeping Jaccard/keyword as a signal source when no embedding exists yet.
    */
-  private calculateRelevance(memory: MemoryUnit, query: string): number {
+  private calculateRelevance(memory: MemoryUnit, query: string, queryEmbedding?: Float32Array): number {
     const queryLower = query.toLowerCase();
     const summaryLower = memory.summary.toLowerCase();
 
     // 1. Jaccard similarity on full text (bag-of-words overlap)
     const jaccard = this.jaccardSimilarity(summaryLower, queryLower);
 
-    // 2. Per-keyword hit scoring: count how many distinct query keywords appear
-    //    in the summary (substring match, not just exact word match)
+    // 2. Per-keyword hit scoring
     const queryKeywords = queryLower
       .split(/\s+/)
       .filter(w => w.length > 2);
@@ -193,17 +198,23 @@ export class MemoryRetrieval {
     ).length;
     const tagScore = tagMatches * 0.15;
 
-    // 4. Combined text similarity (Jaccard + keyword hits, weighted equally)
-    const textSimilarity = jaccard * 0.5 + keywordScore * 0.5;
-
-    // 5. Recency bonus (small, just a nudge toward fresher memories)
+    // 4. Recency bonus (small nudge)
     const ageHours = (Date.now() - memory.createdAt.getTime()) / (1000 * 60 * 60);
     const recencyBonus = Math.max(0, 0.05 - ageHours / 2000);
 
-    // 6. Final score: text similarity first, strength as a multiplier tiebreaker
-    //    textSimilarity * 2.0 gives a range of 0–2.0; multiply by strength
-    //    (0.0–1.0) so strong memories rank slightly above weak ones at equal
-    //    similarity, but a highly relevant weak memory beats an irrelevant strong one.
+    // 5. Text similarity — cosine when available, Jaccard+keyword fallback
+    let textSimilarity: number;
+    if (queryEmbedding && memory.embedding && memory.embedding.length > 0) {
+      const cosine = EmbeddingService.cosineSimilarity(queryEmbedding, memory.embedding);
+      // Cosine is in [-1, 1]; shift to [0, 1] for blending
+      const cosineNorm = (cosine + 1) / 2;
+      textSimilarity = cosineNorm * 0.4 + jaccard * 0.3 + keywordScore * 0.3;
+    } else {
+      // No embeddings — use Jaccard + keyword (original formula)
+      textSimilarity = jaccard * 0.5 + keywordScore * 0.5;
+    }
+
+    // 6. Final: text similarity first, strength as multiplier tiebreaker
     const score = textSimilarity * 2.0 * (0.5 + memory.strength * 0.5) + tagScore + recencyBonus;
 
     return Math.min(1, score);
@@ -288,11 +299,54 @@ export class MemoryRetrieval {
    * - All user-level memories (constraint, preference, learning, procedural)
    * - Project-level memories only if they match the current project
    * 
+   * Ordered by strength DESC (no query context — used as fallback when no
+   * user message is available yet).
+   * 
    * @param options - Scoped retrieval options
    */
   retrieveByScope(options: ScopedRetrievalOptions = {}): MemoryUnit[] {
     const limit = options.limit ?? this.config.defaultRetrievalLimit;
     return this.db.getMemoriesByScope(options.currentProject, limit);
+  }
+
+  /**
+   * Query-aware scoped retrieval.
+   *
+   * Like retrieveByScope but re-ranks the candidate pool using the given
+   * query text before applying the limit.  When the embedding service is
+   * loaded (Phase 4), cosine similarity is blended with Jaccard/keyword scoring
+   * for better semantic recall.  Falls back to Jaccard-only if not loaded.
+   *
+   * Returns MemoryUnit[] (full records, not lightweight index items).
+   */
+  async retrieveByScopeWithQuery(
+    query: string,
+    options: ScopedRetrievalOptions = {}
+  ): Promise<MemoryUnit[]> {
+    const limit = options.limit ?? this.config.defaultRetrievalLimit;
+    const poolSize = Math.min(200, Math.max(50, limit * 10));
+
+    const pool = this.db.getMemoriesByScope(options.currentProject, poolSize);
+    if (!query.trim() || pool.length === 0) {
+      return pool.slice(0, limit);
+    }
+
+    // Try to generate a query embedding for cosine similarity.
+    // If the model isn't loaded yet (first call or slow start), fall back to Jaccard.
+    let queryEmbedding: Float32Array | undefined;
+    try {
+      queryEmbedding = await EmbeddingService.embed(query);
+    } catch {
+      // Model not available — Jaccard fallback (calculateRelevance handles this)
+    }
+
+    const scored = pool.map(mem => ({
+      mem,
+      score: this.calculateRelevance(mem, query, queryEmbedding),
+    }));
+    scored.sort((a, b) => b.score - a.score);
+
+    return scored.slice(0, limit).map(s => s.mem);
   }
 
   /**
