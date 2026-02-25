@@ -580,7 +580,8 @@ async function handleUserMessage(
       const memoryContext = formatMemoriesForInjection(memories, 'session_start', state.worktree);
       await injectContext(state, sessionId, memoryContext);
       log(ctx, 'info', `Lazy injection: ${memories.length} memories (query-aware, STM-first, conflict-filtered) on first user message`);
-      debugLog(`Lazy injection: injected ${memories.length} memories (${memories.filter(m=>m.store==='stm').length} STM, ${memories.filter(m=>m.store==='ltm').length} LTM) with query="${(queryText ?? '').slice(0, 60)}"`);
+      const injectedTokens = memories.reduce((sum, m) => sum + estimateMemoryTokens(m), 0);
+    debugLog(`Lazy injection: injected ${memories.length} memories (${memories.filter(m=>m.store==='stm').length} STM, ${memories.filter(m=>m.store==='ltm').length} LTM, ~${injectedTokens} tokens) with query="${(queryText ?? '').slice(0, 60)}"`);
     }
   }
 
@@ -851,13 +852,32 @@ async function getRelevantMemories(
 }
 
 /**
- * Apply the STM-first injection budget.
+ * Estimate token count for a string using the standard ~4 chars/token heuristic.
+ */
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Estimate the token cost of injecting a single MemoryUnit as a formatted line.
+ * Format mirrors formatMemoriesForInjection: "- [STM] [classification] summary\n"
+ */
+function estimateMemoryTokens(mem: MemoryUnit): number {
+  const line = `- [${mem.store.toUpperCase()}] [${mem.classification}] ${mem.summary}\n`;
+  return estimateTokens(line);
+}
+
+/**
+ * Apply the STM-first dynamic injection budget.
  *
- * Phases 2 of the retrieval flow:
+ * Phase 5 of the retrieval flow — token-aware scaling:
+ *
  *   1. STM memories go first (recency bias — mirrors human short-term recall).
- *      Capped at STM_CAP (default 3).
- *   2. Remaining budget filled with LTM memories.
- *   3. Total never exceeds TOTAL_CAP (default 7).
+ *   2. Remaining token budget filled with LTM memories.
+ *   3. Token budget defaults to PSYCHMEM_INJECTION_TOKEN_BUDGET env var (default 800).
+ *   4. Hard count cap still applies (totalCap) as a safety net.
+ *   5. Soft floor: always include at least 1 memory when the pool is non-empty,
+ *      even if the first memory exceeds the token budget.
  *
  * The input list is already relevance-ranked by getRelevantMemories; this
  * function preserves that ranking within each tier.
@@ -865,12 +885,45 @@ async function getRelevantMemories(
 function applyInjectionBudget(
   memories: MemoryUnit[],
   stmCap: number = 3,
-  totalCap: number = 7
+  totalCap: number = 7,
+  tokenBudget: number = parseEnvNumber(process.env['PSYCHMEM_INJECTION_TOKEN_BUDGET'], 800)
 ): MemoryUnit[] {
-  const stm = memories.filter(m => m.store === 'stm').slice(0, stmCap);
-  const ltmBudget = totalCap - stm.length;
-  const ltm = memories.filter(m => m.store === 'ltm').slice(0, ltmBudget);
-  return [...stm, ...ltm];
+  if (memories.length === 0) return [];
+
+  // Overhead for the block header + section headers + blank lines (~50 tokens)
+  const HEADER_OVERHEAD_TOKENS = 50;
+  let remainingTokens = tokenBudget - HEADER_OVERHEAD_TOKENS;
+
+  const stmPool = memories.filter(m => m.store === 'stm').slice(0, stmCap);
+  const ltmPool = memories.filter(m => m.store === 'ltm');
+
+  const selected: MemoryUnit[] = [];
+
+  // Phase A: greedily fill STM budget
+  for (const mem of stmPool) {
+    const cost = estimateMemoryTokens(mem);
+    if (remainingTokens <= 0 && selected.length > 0) break;
+    selected.push(mem);
+    remainingTokens -= cost;
+    if (selected.length >= totalCap) break;
+  }
+
+  // Phase B: fill remaining budget with LTM
+  for (const mem of ltmPool) {
+    if (selected.length >= totalCap) break;
+    const cost = estimateMemoryTokens(mem);
+    if (remainingTokens <= 0 && selected.length > 0) break;
+    selected.push(mem);
+    remainingTokens -= cost;
+  }
+
+  // Soft floor: if the pool is non-empty but nothing was selected (budget
+  // exhausted before we started), always include at least the first memory.
+  if (selected.length === 0 && memories.length > 0) {
+    selected.push(memories[0]!);
+  }
+
+  return selected;
 }
 
 
