@@ -148,6 +148,13 @@ interface OpenCodeAdapterState {
   currentSessionId: string | null;
   /** Sessions that have already received a memory injection this process lifetime */
   injectedSessions: Set<string>;
+  /**
+   * Per-process watermark map: OpenCode session ID → number of messages already
+   * processed by handleSessionIdle.  Keyed by the OpenCode external session ID
+   * (e.g. "ses_36cbdd4d6ffeGT6CgTCeHSfRsG") so it survives OpenCode session
+   * continuations (-c) without being confused by PsychMem's internal UUIDs.
+   */
+  messageWatermarks: Map<string, number>;
   worktree: string;
   client: OpenCodeClient;
 }
@@ -185,6 +192,7 @@ export async function createOpenCodePlugin(
     config,
     currentSessionId: null,
     injectedSessions: new Set<string>(),
+    messageWatermarks: new Map<string, number>(),
     worktree,
     client: ctx.client,
   };
@@ -391,8 +399,11 @@ async function handleSessionIdle(
     debugLog(`state.currentSessionId set from idle event: ${sessionId}`);
   }
   
-  // Get current watermark
-  const watermark = state.db.getMessageWatermark(effectiveSessionId);
+  // Get current watermark from in-process map (keyed by OpenCode session ID).
+  // Using in-memory map rather than the DB because the DB watermark is stored
+  // against PsychMem's internal UUID — which changes every restart — not the
+  // OpenCode session ID, so db.getMessageWatermark always returned 0.
+  const watermark = state.messageWatermarks.get(effectiveSessionId) ?? 0;
   debugLog(`Watermark for session ${effectiveSessionId}: ${watermark}`);
   
   // Fetch messages from OpenCode
@@ -418,7 +429,7 @@ async function handleSessionIdle(
   const conversationText = extractConversationText(newMessages);
   
   if (!conversationText.trim()) {
-    state.db.updateMessageWatermark(effectiveSessionId, messages.length);
+    state.messageWatermarks.set(effectiveSessionId, messages.length);
     debugLog('No text content in new messages, updated watermark only');
     return;
   }
@@ -444,7 +455,7 @@ async function handleSessionIdle(
   const result = await state.psychmem.handleHook(hookInput);
   
   // Update watermark only after successful (or at least attempted) processing
-  state.db.updateMessageWatermark(effectiveSessionId, messages.length);
+  state.messageWatermarks.set(effectiveSessionId, messages.length);
   
   if (result.success) {
     const memoriesCreated = result.memoriesCreated ?? 0;
@@ -523,6 +534,14 @@ async function handleUserMessage(
 
   if (!sessionId) {
     debugLog('handleUserMessage: no sessionId — BAILING');
+    return;
+  }
+
+  // Skip injected noReply messages (e.g. the memory block we just injected).
+  // These echo back through chat.message with no messageID and must not be
+  // re-extracted as memories — they are our own output, not user input.
+  if (!input.messageID) {
+    debugLog('handleUserMessage: no messageID — skipping (injected noReply echo)');
     return;
   }
 
@@ -640,6 +659,17 @@ async function handleUserMessage(
 export function preFilterImportance(text: string, threshold: number): boolean {
   // Special case: threshold 0 means always pass.
   if (threshold === 0) return true;
+
+  // Fast-reject: never extract our own injected memory blocks.
+  // These headers are written by formatMemoriesForInjection() and must not
+  // be re-ingested as new memories — they are already stored content.
+  if (
+    text.includes('## Relevant Memories from Previous Sessions') ||
+    text.includes('## Preserved Memories (from PsychMem)')
+  ) {
+    debugLog('preFilterImportance: rejecting injected memory block');
+    return false;
+  }
 
   const memorySignalPattern = /remember|don't forget|keep in mind|note that|important|never|always|must|cannot|decided|decision|prefer|learned|realized|discovered|fixed|bug|error|wrong|incorrect|!{2,}/i;
   const emphasisPattern = /[A-Z]{4,}/; // case-sensitive: ALL_CAPS is an emphasis signal

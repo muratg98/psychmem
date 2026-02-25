@@ -259,21 +259,28 @@ export class ContextSweep {
    * 4. Whole content as single chunk
    */
   private splitIntoChunks(content: string): string[] {
-    // 1. Double-newline paragraphs
-    const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim().length > 20);
-    if (paragraphs.length > 1) {
-      return paragraphs;
+    // If the content has role prefixes (Human:/Assistant:), skip straight to
+    // turn-based splitting. Paragraph splitting would strip those prefixes,
+    // causing detectChunkRole() to return undefined and letting assistant
+    // reasoning slip through the extraction filter as if it were user text.
+    const hasTurnPattern = /^(Human|Assistant|Tool Result|Tool Error):/m.test(content);
+
+    // 1. Double-newline paragraphs — only when there are no role prefixes
+    if (!hasTurnPattern) {
+      const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim().length > 20);
+      if (paragraphs.length > 1) {
+        return paragraphs;
+      }
     }
-    
+
     // 2. Conversation turns — split on Human:/Assistant: boundaries
     //    Groups consecutive lines belonging to the same speaker
-    const turnPattern = /^(Human|Assistant|Tool Result|Tool Error):/m;
-    if (turnPattern.test(content)) {
+    if (hasTurnPattern) {
       const turns: string[] = [];
       let currentTurn = '';
       
       for (const line of content.split('\n')) {
-        if (turnPattern.test(line) && currentTurn.trim()) {
+        if (/^(Human|Assistant|Tool Result|Tool Error):/.test(line) && currentTurn.trim()) {
           turns.push(currentTurn.trim());
           currentTurn = line;
         } else {
